@@ -1,0 +1,16 @@
+{
+  "users": [
+    {"_id": "u-owner-1", "email": "owner@dukani.dev", "role": "owner", "assigned_shop_ids": []},
+    {"_id": "u-keeper-1", "email": "keeper@dukani.dev", "role": "shopkeeper", "assigned_shop_ids": ["s-1"]},
+    {"_id": "u-customer-1", "email": "customer@dukani.dev", "role": "customer", "assigned_shop_ids": []}
+  ],
+  "shops": [
+    {"_id": "s-1", "name": "Dukani Central", "owner_id": "u-owner-1", "subscription_plan": "online"}
+  ],
+  "products": [
+    {"_id": "p-1", "shop_id": "s-1", "name": "Wireless Keyboard", "price": 45.5, "stock": 30, "is_public": true}
+  ],
+  "subscriptions": [
+    {"_id": "sub-1", "shop_id": "s-1", "plan": "online", "status": "active"}
+  ]
+}
