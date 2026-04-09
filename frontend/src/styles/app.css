@@ -1,0 +1,40 @@
+body { font-family: Inter, Arial, sans-serif; margin: 0; background: #fafafa; }
+.container { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+.header, .footer { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: #0d1b2a; color: #fff; }
+.header nav a { color: #fff; margin-left: 1rem; text-decoration: none; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
+.card, .summary, .row, .hero { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; background: #fff; }
+.card-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: .5rem; align-items: center; }
+.stack-lg { display: grid; gap: 1.2rem; }
+.stack-md { display: grid; gap: 1rem; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.toolbar { display: flex; gap: .75rem; flex-wrap: wrap; }
+.thumb { height: 120px; border-radius: 6px; background: linear-gradient(135deg, #dbeafe, #e2e8f0); margin-bottom: .75rem; }
+.warning { border-color: #f59e0b; }
+.danger { color: #b91c1c; font-weight: 600; }
+.hero { background: linear-gradient(120deg, #eef2ff, #e0f2fe); }
+.btn-lg { min-height: 44px; padding: .75rem 1rem; font-weight: 600; }
+.touch-card button { width: 100%; }
+.active { background: #0ea5e9; color: white; border-color: #0284c7; }
+.chart-placeholder { height: 100px; border: 1px dashed #94a3b8; display: grid; place-content: center; border-radius: 6px; color: #475569; }
+input, select, button { border: 1px solid #cbd5e1; border-radius: 6px; padding: .55rem .65rem; }
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.4); display: grid; place-content: center; }
+@media (max-width: 900px) {
+  .split { grid-template-columns: 1fr; }
+}
+@media (max-width: 640px) {
+  .header { flex-direction: column; align-items: flex-start; gap: .5rem; }
+  .card-row { grid-template-columns: 1fr; }
+}
+
+
+.pos-layout { display: grid; grid-template-columns: 1.6fr .9fr; gap: 1rem; align-items: start; }
+.pos-left { min-width: 0; }
+.pos-right { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
+.pos-product-card { cursor: pointer; }
+.pos-cart-item { grid-template-columns: 1.5fr 1fr 1fr auto; align-items: center; }
+.pos-modal { width: min(500px, 92vw); }
+@media (max-width: 1024px) {
+  .pos-layout { grid-template-columns: 1fr; }
+  .pos-right { position: static; max-height: none; }
+}
