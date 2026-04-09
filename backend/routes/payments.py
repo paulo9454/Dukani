@@ -26,7 +26,12 @@ def verify_paystack(payload: dict, user=Depends(require_roles("owner", "admin", 
     # Sandbox-safe verification stub. Real integration should call Paystack verify API
     # from the backend using secret key and webhook reconciliation.
     if str(reference).lower().startswith("fail"):
-        raise HTTPException(status_code=400, detail="Paystack verification failed")
+        return {
+            "status": "failed",
+            "verified": False,
+            "reference": reference,
+            "provider": "Paystack",
+        }
 
     return {
         "status": "success",

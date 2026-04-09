@@ -122,10 +122,13 @@ export default function POSDashboardPage() {
           ref: reference,
           onSuccess: async (transaction) => {
             try {
-              await api('/api/payments/paystack/verify', {
+              const verification = await api('/api/payments/paystack/verify', {
                 method: 'POST',
                 body: JSON.stringify({ reference: transaction.reference })
               })
+              if (!verification?.verified) {
+                throw new Error('Paystack verification failed')
+              }
               setPaymentMethod('paystack')
               setPaymentData((prev) => ({
                 ...prev,
