@@ -1,0 +1,4 @@
+html { box-sizing: border-box; overflow-y: scroll; }
+*, *:before, *:after { box-sizing: inherit; }
+body { margin: 0; background: #fafafa; }
+#swagger-ui { font-family: sans-serif; padding: 16px; }

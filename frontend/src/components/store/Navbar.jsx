@@ -2,7 +2,10 @@ export default function Navbar({ search, onSearch, onCartClick, onAuthClick }) {
   return (
     <nav className="sticky top-0 z-50 bg-white border-b py-4 px-4 md:px-10">
       <div className="max-w-7xl mx-auto flex items-center gap-4 justify-between">
-        <h1 className="text-2xl font-bold text-indigo-600">Dukani</h1>
+        <div className="flex items-center gap-2">
+          <img src="/logo.svg" alt="Dukani logo" className="h-8 w-8" />
+          <h1 className="text-2xl font-bold text-indigo-600">Dukani</h1>
+        </div>
 
         <input
           value={search}
