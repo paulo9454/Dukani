@@ -2,6 +2,9 @@ body { font-family: Inter, Arial, sans-serif; margin: 0; background: #fafafa; }
 .container { max-width: 1200px; margin: 0 auto; padding: 1rem; }
 .header, .footer { display: flex; justify-content: space-between; align-items: center; padding: 1rem; background: #0d1b2a; color: #fff; }
 .header nav a { color: #fff; margin-left: 1rem; text-decoration: none; }
+.header .brand { display: flex; align-items: center; gap: .6rem; }
+.brand-logo { width: 34px; height: 34px; border-radius: 8px; }
+
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .card, .summary, .row, .hero { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; background: #fff; }
 .card-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: .5rem; align-items: center; }

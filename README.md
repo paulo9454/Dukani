@@ -1,4 +1,4 @@
-# Dukani (CloudDuka) Full-Stack E-commerce + POS
+# Dukani Full-Stack E-commerce + POS
 
 Production-ready starter implementing role-based commerce, subscription gating, stock-safe checkout, and test automation.
 
