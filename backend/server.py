@@ -5,19 +5,16 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from backend.routes import (
     auth,
-    products,
-    orders,
-    customer,
     marketplace,
     payments,
     dashboard,
-    public,
     credit,
     credit_history,
     damaged_stock,
     suppliers,
     notifications,
 )
+from backend.routers import owner, pos, public
 from backend.db.mongo import get_db
 from backend.services.seed import seed_full_data
 from backend.core.settings import settings
@@ -58,13 +55,12 @@ else:
 
 for router in [
     auth.router,
-    products.router,
-    orders.router,
-    customer.router,
+    owner.router,
+    pos.router,
+    public.router,
     marketplace.router,
     payments.router,
     dashboard.router,
-    public.router,
     credit.router,
     credit_history.router,
     damaged_stock.router,
