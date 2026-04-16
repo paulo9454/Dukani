@@ -162,12 +162,20 @@ def checkout(
 
 
 @router.get("/api/orders")
+
 def list_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()
+    
+def list_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper", "customer"))):
+    db = get_db()
+    if user["role"] == "customer":
+        return list(db.orders.find({"customer_id": user["_id"]}))
+
     if user["role"] == "shopkeeper":
         locked_shop = _resolve_assigned_shop(user)
         return list(db.orders.find({"shop_id": locked_shop}))
     return list(db.orders.find({}))
+
 
 
 @router.get("/api/customer/orders")

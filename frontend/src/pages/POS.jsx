@@ -29,7 +29,11 @@ function POS({ shopId: presetShopId }) {
 
     const load = async () => {
       try {
+
         const data = await getProducts({ shop_id: effectiveShopId });
+
+        const data = await getProducts({ shop_id: presetShopId || shopId });
+
         setProducts(data);
       } catch (err) {
         console.error("Products error:", err);

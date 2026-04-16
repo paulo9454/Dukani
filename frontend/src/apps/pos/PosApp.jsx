@@ -4,11 +4,14 @@ import { getProducts } from "../../api/products";
 
 function PosApp({ user }) {
   const assignedShopId = useMemo(() => user?.assigned_shop_ids?.[0] || "", [user]);
+
   const [shopId, setShopId] = useState("");
+
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
 
   useEffect(() => {
+
     setShopId(assignedShopId);
   }, [assignedShopId]);
 
@@ -19,6 +22,12 @@ function PosApp({ user }) {
     }
     getProducts({ shop_id: shopId }).then((data) => setProducts(Array.isArray(data) ? data : []));
   }, [shopId]);
+
+
+    if (!assignedShopId) return;
+    getProducts({ shop_id: assignedShopId }).then(setProducts);
+  }, [assignedShopId]);
+
 
   const total = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
 
@@ -32,7 +41,11 @@ function PosApp({ user }) {
 
   const checkout = async () => {
     await API.post("/api/orders/checkout", {
+
       shop_id: shopId,
+
+      shop_id: assignedShopId,
+
       items: cart.map((i) => ({ product_id: i._id, qty: i.qty })),
       payment_provider: "POS",
       payment_method: "cash",
@@ -41,12 +54,20 @@ function PosApp({ user }) {
     alert("Sale completed");
   };
 
+
   if (!shopId) return <h3>No assigned shop found for this POS user.</h3>;
+
+  if (!assignedShopId) return <h3>No assigned shop found for this POS user.</h3>;
+
 
   return (
     <div>
       <h2>Shopkeeper POS</h2>
+
       <p>Assigned shop: <strong>{shopId}</strong> (locked)</p>
+
+      <p>Assigned shop: <strong>{assignedShopId}</strong> (locked)</p>
+
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
         <div>
           {products.map((p) => (
