@@ -21,15 +21,22 @@ def get_client():
         _client = mongomock.MongoClient()
     else:
         _client = MongoClient(settings.mongo_url)
+
     return _client
 
 
 def get_db():
-    return get_client()[settings.db_name]
+    db = get_client()[settings.db_name]
+
+    # ✅ DEBUG LINE (CONFIRMS ACTIVE DATABASE)
+    print("DB NAME IN USE:", db.name)
+
+    return db
 
 
 def reset_db():
     db = get_db()
+
     for col in [
         "users",
         "shops",

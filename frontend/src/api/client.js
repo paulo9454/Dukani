@@ -1,20 +1,73 @@
-import { useAuth } from '../auth/useAuth'
+import axios from "axios";
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+const API = axios.create({
+  baseURL: "http://127.0.0.1:8000",
+});
 
-export async function api(path, options = {}) {
-  const token = useAuth.getState().token
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) }
-  if (token) headers.Authorization = `Bearer ${token}`
+// ================================
+// REQUEST INTERCEPTOR
+// ================================
+API.interceptors.request.use((config) => {
+  const token = localStorage.getItem("token");
 
-  const res = await fetch(`${API}${path}`, { ...options, headers })
-  if (res.status === 401 || res.status === 403) {
-    useAuth.getState().logout()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: 'Unknown error' }))
-    throw new Error(err.detail || 'Request failed')
+  return config;
+});
+
+// ================================
+// REFRESH FUNCTION
+// ================================
+const refreshToken = async () => {
+  try {
+    const refresh_token = localStorage.getItem("refresh_token");
+
+    if (!refresh_token) return null;
+
+    const res = await axios.post(
+      "http://127.0.0.1:8000/api/auth/refresh",
+      {
+        refresh_token,
+      }
+    );
+
+    localStorage.setItem("token", res.data.access_token);
+    localStorage.setItem("user", JSON.stringify(res.data.user));
+
+    return res.data.access_token;
+  } catch (err) {
+    console.error("Refresh failed");
+    return null;
   }
-  return res.json()
-}
+};
+
+// ================================
+// RESPONSE INTERCEPTOR
+// ================================
+API.interceptors.response.use(
+  (response) => response,
+
+  async (error) => {
+    const originalRequest = error.config;
+
+    if (error?.response?.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+
+      const newToken = await refreshToken();
+
+      if (newToken) {
+        originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        return API(originalRequest);
+      }
+
+      localStorage.clear();
+      window.location.href = "/login";
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+export default API;

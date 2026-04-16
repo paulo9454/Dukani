@@ -1,6 +1,9 @@
+
 import os
-os.environ["TESTING"] = "1"
-os.environ["DB_NAME"] = "dukani_test"
+
+if os.getenv("RUNNING_TESTS") == "1":
+    os.environ["TESTING"] = "1"
+    os.environ["DB_NAME"] = "dukani_test"
 
 from fastapi.testclient import TestClient
 from backend.server import app

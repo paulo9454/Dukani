@@ -7,6 +7,8 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str
+
+    # 🔥 FIX: only allow customer or owner (enforced by RoleType)
     role: RoleType
 
 

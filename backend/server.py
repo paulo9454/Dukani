@@ -41,7 +41,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.frontend_origins,
+    allow_origins=["*"],  # 🔥 allow everything (dev only)
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -80,41 +80,41 @@ def custom_swagger_ui_html():
         """<!DOCTYPE html>
 <html>
   <head>
-    <meta charset=\"UTF-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Dukani API - Swagger UI</title>
-    <link rel=\"icon\" href=\"/docs/favicon.ico\" />
-    <link rel=\"stylesheet\" href=\"/static/docs/swagger-ui.css\" />
+    <link rel="icon" href="/docs/favicon.ico" />
+    <link rel="stylesheet" href="/static/docs/swagger-ui.css" />
   </head>
   <body>
-    <div id=\"swagger-ui\"></div>
-    <script src=\"/static/docs/swagger-ui-bundle.js\"></script>
-    <script src=\"/static/docs/swagger-initializer.js\"></script>
+    <div id="swagger-ui"></div>
+
+    <script src="/static/docs/swagger-ui-bundle.js"></script>
+    <script src="/static/docs/swagger-ui-standalone-preset.js"></script>  <!-- 🔥 THIS LINE -->
+    <script src="/static/docs/swagger-initializer.js"></script>
+
   </body>
 </html>"""
     )
 
 
-@app.get("/redoc", include_in_schema=False)
-def redoc_html():
-    return HTMLResponse(
-        """<!DOCTYPE html>
+@app.get("/docs", include_in_schema=False)
+def custom_swagger_ui_html():
+    return HTMLResponse("""
+<!DOCTYPE html>
 <html>
   <head>
-    <meta charset=\"UTF-8\" />
-    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-    <title>Dukani API - ReDoc</title>
-    <link rel=\"icon\" href=\"/docs/favicon.ico\" />
-    <style>
-      body { margin: 0; padding: 0; }
-    </style>
+    <title>Dukani API Docs</title>
+    <link rel="stylesheet" href="/static/docs/swagger-ui.css" />
   </head>
   <body>
-    <redoc spec-url=\"/openapi.json\"></redoc>
-    <script src=\"/static/docs/redoc.standalone.js\"></script>
+    <div id="swagger-ui"></div>
+
+    <script src="/static/docs/swagger-ui-bundle.js"></script>
+    <script src="/static/docs/swagger-initializer.js"></script>
   </body>
-</html>"""
-    )
+</html>
+""")
 
 
 @app.get("/docs/favicon.ico", include_in_schema=False)

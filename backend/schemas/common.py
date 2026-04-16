@@ -2,7 +2,9 @@ from pydantic import BaseModel, Field
 from typing import Literal
 
 
-RoleType = Literal["owner", "admin", "partner", "shopkeeper", "customer"]
+# 🔥 FIX: simplified POS role system (customer + owner only)
+RoleType = Literal["customer", "owner"]
+
 PlanType = Literal["pos", "online", "legacy"]
 
 

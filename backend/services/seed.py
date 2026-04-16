@@ -15,7 +15,7 @@ def seed_full_data():
         {
             "_id": owner_id,
             "email": "owner.seed@dukani.dev",
-            "password_hash": hash_password("Passw0rd!"),
+            "password_hash": hash_password("Dukani@2026"),
             "full_name": "Seed Owner",
             "role": "owner",
             "assigned_shop_ids": [],
@@ -23,7 +23,7 @@ def seed_full_data():
         {
             "_id": shopkeeper_a,
             "email": "keeper.a@dukani.dev",
-            "password_hash": hash_password("Passw0rd!"),
+            "password_hash": hash_password("Keeper@2026"),
             "full_name": "Keeper A",
             "role": "shopkeeper",
             "assigned_shop_ids": [],
@@ -31,7 +31,7 @@ def seed_full_data():
         {
             "_id": shopkeeper_b,
             "email": "keeper.b@dukani.dev",
-            "password_hash": hash_password("Passw0rd!"),
+            "password_hash": hash_password("Keeper@2026"),
             "full_name": "Keeper B",
             "role": "shopkeeper",
             "assigned_shop_ids": [],
@@ -39,7 +39,7 @@ def seed_full_data():
         {
             "_id": customer_id,
             "email": "customer.seed@dukani.dev",
-            "password_hash": hash_password("Passw0rd!"),
+            "password_hash": hash_password("Customer@2026"),
             "full_name": "Seed Customer",
             "role": "customer",
             "assigned_shop_ids": [],

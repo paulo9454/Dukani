@@ -1,8 +1,13 @@
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
+from pathlib import Path
 
-load_dotenv()
+# ✅ ALWAYS load correct .env from project root
+BASE_DIR = Path(__file__).resolve().parents[2]
+ENV_PATH = BASE_DIR / ".env"
+
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 
 class Settings(BaseModel):
@@ -11,8 +16,16 @@ class Settings(BaseModel):
     jwt_secret: str = os.getenv("JWT_SECRET", "dev-secret")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
-    refresh_token_expire_minutes: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "10080"))  # 7 days
-    frontend_origins: list[str] = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000").split(",")
+    refresh_token_expire_minutes: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_MINUTES", "10080"))
+    frontend_origins: list[str] = os.getenv(
+        "FRONTEND_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",")
 
 
 settings = Settings()
+
+# ✅ DEBUG (KEEP TEMPORARILY)
+print("ENV FILE USED:", ENV_PATH)
+print("DB NAME LOADED:", settings.db_name)
+print("JWT SECRET IN USE:", settings.jwt_secret)
