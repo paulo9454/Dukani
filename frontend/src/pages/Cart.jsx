@@ -19,7 +19,7 @@ function Cart() {
   // GET PRODUCTS
   // =========================
   const fetchProducts = async () => {
-    const res = await API.get("/api/products");
+    const res = await API.get("/api/public/products");
 
     // convert to lookup map
     const map = {};

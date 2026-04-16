@@ -3,7 +3,7 @@ from typing import Literal
 
 
 # 🔥 FIX: simplified POS role system (customer + owner only)
-RoleType = Literal["customer", "owner"]
+RoleType = Literal["customer", "owner", "shopkeeper", "admin", "partner"]
 
 PlanType = Literal["pos", "online", "legacy"]
 

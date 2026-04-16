@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { getProducts } from "../api/products";
 
-function POS() {
+function POS({ shopId: presetShopId }) {
   const [products, setProducts] = useState([]);
   const [cart, setCart] = useState([]);
-  const [shopId, setShopId] = useState(null);
+  const [shopId, setShopId] = useState(presetShopId || null);
 
   const [search, setSearch] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -18,7 +18,7 @@ function POS() {
   useEffect(() => {
     const load = async () => {
       try {
-        const data = await getProducts();
+        const data = await getProducts({ shop_id: presetShopId || shopId });
         setProducts(data);
       } catch (err) {
         console.error("Products error:", err);
@@ -26,7 +26,7 @@ function POS() {
     };
 
     load();
-  }, []);
+  }, [presetShopId, shopId]);
 
   // =========================
   // FILTER BY SHOP + SEARCH
@@ -46,7 +46,7 @@ function POS() {
   const addToCart = (product) => {
     if (!shopId) setShopId(product.shop_id);
 
-    if (product.shop_id !== shopId) {
+    if (shopId && product.shop_id !== shopId) {
       alert("❌ Cannot mix products from different shops");
       return;
     }
