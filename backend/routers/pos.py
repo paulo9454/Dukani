@@ -21,6 +21,9 @@ def _resolve_assigned_shop(user: dict, requested_shop_id: str | None = None) -> 
     if requested_shop_id and requested_shop_id not in assigned:
         raise HTTPException(status_code=403, detail="Shopkeeper cannot switch shops")
 
+    if requested_shop_id:
+        return requested_shop_id
+
     return assigned[0]
 
 
@@ -159,14 +162,26 @@ def checkout(
 
 
 @router.get("/api/orders")
+
+def list_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
+    db = get_db()
+    
 def list_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper", "customer"))):
     db = get_db()
     if user["role"] == "customer":
         return list(db.orders.find({"customer_id": user["_id"]}))
+
     if user["role"] == "shopkeeper":
         locked_shop = _resolve_assigned_shop(user)
         return list(db.orders.find({"shop_id": locked_shop}))
     return list(db.orders.find({}))
+
+
+
+@router.get("/api/customer/orders")
+def list_customer_orders(user=Depends(require_roles("customer"))):
+    db = get_db()
+    return list(db.orders.find({"customer_id": user["_id"]}))
 
 
 @router.post("/api/orders/checkout")

@@ -10,7 +10,7 @@ function ShopSelector({ onSelect }) {
     try {
       const res = await getShops();
 
-      const shopList = res.shops || [];
+      const shopList = Array.isArray(res) ? res : (res.shops || []);
 
       setShops(shopList);
 

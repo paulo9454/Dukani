@@ -4,7 +4,7 @@ import API from "./client";
 // GET SHOPS
 // =========================
 export const getShops = async () => {
-  const res = await API.get("/api/dashboard/shops");
+  const res = await API.get("/api/owner/shops");
   return res.data;
 };
 
@@ -12,9 +12,9 @@ export const getShops = async () => {
 // CREATE SHOP
 // =========================
 export const createShop = async (name) => {
-  const res = await API.post("/api/dashboard/shops", {
+  const res = await API.post("/api/owner/shops", {
     name,
-    subscription_plan: "legacy", // ✅ REQUIRED by backend
+    subscription_plan: "online",
   });
 
   return res.data;

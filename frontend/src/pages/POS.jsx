@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getProducts } from "../api/products";
+import API from "../api/client";
 
 function POS({ shopId: presetShopId }) {
   const [products, setProducts] = useState([]);
@@ -10,18 +11,33 @@ function POS({ shopId: presetShopId }) {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [loading, setLoading] = useState(false);
 
-  const token = localStorage.getItem("token");
-
   // =========================
   // LOAD PRODUCTS
   // =========================
   useEffect(() => {
+    if (presetShopId) {
+      setShopId(presetShopId);
+    }
+  }, [presetShopId]);
+
+  useEffect(() => {
+    const effectiveShopId = presetShopId || shopId;
+    if (!effectiveShopId) {
+      setProducts([]);
+      return;
+    }
+
     const load = async () => {
       try {
+
+        const data = await getProducts({ shop_id: effectiveShopId });
+
         const data = await getProducts({ shop_id: presetShopId || shopId });
+
         setProducts(data);
       } catch (err) {
         console.error("Products error:", err);
+        setProducts([]);
       }
     };
 
@@ -84,7 +100,7 @@ function POS({ shopId: presetShopId }) {
   // =========================
   const resetPOS = () => {
     setCart([]);
-    setShopId(null);
+    setShopId(presetShopId || null);
     setSearch("");
     setPaymentMethod("cash");
   };
@@ -101,28 +117,15 @@ function POS({ shopId: presetShopId }) {
     setLoading(true);
 
     try {
-      const res = await fetch(
-        "http://127.0.0.1:8000/api/orders/checkout",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            shop_id: shopId,
-            items: cart.map((i) => ({
-              product_id: i._id,
-              qty: i.qty,
-            })),
-            payment_method: paymentMethod,
-          }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) throw new Error(data.detail || "Checkout failed");
+      const { data } = await API.post("/api/orders/checkout", {
+        shop_id: shopId,
+        items: cart.map((i) => ({
+          product_id: i._id,
+          qty: i.qty,
+        })),
+        payment_provider: "POS",
+        payment_method: paymentMethod,
+      });
 
       // =========================
       // RECEIPT OBJECT (FRONTEND READY)
