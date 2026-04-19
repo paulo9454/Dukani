@@ -1,3 +1,4 @@
+# DEPRECATED: Not mounted in server.py
 from fastapi import APIRouter, Depends, Header
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db

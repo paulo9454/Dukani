@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
 
-router = APIRouter(prefix="/api/public", tags=["public"])
+router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 
 
 # =========================
