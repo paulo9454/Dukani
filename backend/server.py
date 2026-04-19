@@ -55,11 +55,15 @@ for m in app.user_middleware:
 else:
     rate_limiter_middleware = None
 
+# New router namespace first
+app.include_router(owner.router)
+app.include_router(pos.router, tags=["POS"])
+app.include_router(public.router)
+print("✅ POS router loaded")
+
+# Legacy routes second
 for router in [
     auth.router,
-    owner.router,
-    pos.router,
-    public.router,
     marketplace.router,
     payments.router,
     dashboard.router,
@@ -69,7 +73,7 @@ for router in [
     suppliers.router,
     notifications.router,
     shop.router,
-    customer.router,  # ✅ FIX: mounted customer routes
+    customer.router,  # customer cart/order views only (checkout is POS-owned)
 ]:
     app.include_router(router)
 

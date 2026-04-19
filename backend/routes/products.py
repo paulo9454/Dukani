@@ -1,3 +1,4 @@
+# DEPRECATED: Not mounted in server.py
 from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
 from backend.services.visibility import is_product_visible

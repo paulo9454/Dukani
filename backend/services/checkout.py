@@ -161,7 +161,10 @@ def checkout_customer(
     remember_idempotency(scope, idempotency_key, order_id)
 
     # ✅ RECEIPT
-    receipt = build_receipt(order)
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(404, "Shop not found for receipt")
+    receipt = build_receipt(order, shop)
 
     return {**order, "receipt": receipt}
 
@@ -254,7 +257,10 @@ def checkout_pos(
     remember_idempotency(scope, idempotency_key, order_id)
 
     # ✅ RECEIPT SYSTEM
-    receipt = build_receipt(order)
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(404, "Shop not found for receipt")
+    receipt = build_receipt(order, shop, operator)
 
     audit_log(
         "pos_checkout",

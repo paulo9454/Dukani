@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from backend.core.deps import get_current_user, require_roles
 from backend.db.mongo import get_db
-from backend.schemas.order import CheckoutRequest, POSCheckoutRequest
-from backend.services.checkout import checkout_customer, checkout_pos
+from backend.schemas.order import POSCheckoutRequest
+from backend.services.checkout import checkout_pos
 from backend.services.audit import audit_log
 from backend.services.safe_query import safe_str
 import uuid
 
-router = APIRouter(tags=["pos"])
+router = APIRouter()
 
 
 # =========================
@@ -143,24 +143,4 @@ def pos_checkout(
     )
 
 
-# =========================
-# CUSTOMER CHECKOUT (UNCHANGED CORE)
-# =========================
-@router.post("/api/customer/checkout")
-def customer_checkout(
-    payload: CheckoutRequest,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    user=Depends(require_roles("customer")),
-):
-    key = idempotency_key or payload.idempotency_key
-
-    if not key:
-        raise HTTPException(status_code=400, detail="Idempotency key required")
-
-    return checkout_customer(
-        user,
-        payload.payment_provider,
-        key,
-        payload.payment_method,
-        payload.payment_meta,
-    )
+# DEPRECATED: customer checkout endpoint removed from POS router.

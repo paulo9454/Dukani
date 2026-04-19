@@ -1,10 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
-from backend.schemas.order import CartItemInput, CheckoutRequest
-from backend.services.checkout import checkout_customer
-from backend.services.audit import audit_log
-import uuid
+from backend.schemas.order import CartItemInput
 
 router = APIRouter(prefix="/api/customer", tags=["customer"])
 
@@ -121,32 +118,7 @@ def remove_from_cart(product_id: str, user=Depends(require_roles("customer"))):
     }
 
 
-# =========================
-# 💳 CHECKOUT
-# =========================
-@router.post("/checkout")
-def checkout(
-    payload: CheckoutRequest,
-    idempotency_key_header: str | None = Header(default=None, alias="Idempotency-Key"),
-    user=Depends(require_roles("customer")),
-):
-    idempotency_key = idempotency_key_header or payload.idempotency_key or str(uuid.uuid4())
-
-    result = checkout_customer(
-        user,
-        payload.payment_provider,
-        idempotency_key,
-        payload.payment_method,
-        payload.payment_meta,
-    )
-
-    audit_log(
-        "customer_checkout_request",
-        actor_id=user["_id"],
-        metadata={"idempotency_key": idempotency_key},
-    )
-
-    return result
+# DEPRECATED: checkout is POS-owned at /api/orders/checkout (routers/pos.py).
 
 
 # =========================
