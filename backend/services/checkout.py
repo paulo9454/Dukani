@@ -1,160 +1,174 @@
 from fastapi import HTTPException
 from backend.db.mongo import get_db
-from datetime import datetime, timezone
 from backend.services.payment_verifier import verify_payment
+from backend.services.receipt import build_receipt
 from backend.services.audit import audit_log
+from datetime import datetime, timezone
 import uuid
 
 
-ONLINE_ALLOWED = {"online", "legacy", 1000}
+# =========================
+# UTILS
+# =========================
+def now():
+    return datetime.now(timezone.utc).isoformat()
 
 
+def round2(v: float) -> float:
+    return round(float(v), 2)
+
+
+# =========================
+# SHOP RULE
+# =========================
 def shop_online_enabled(shop_id: str) -> bool:
     db = get_db()
-    subscription = db.subscriptions.find_one({"shop_id": shop_id})
-    if not subscription:
+
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        return False
+
+    if shop.get("online_enabled") is True:
         return True
-    plan = subscription.get("plan", "legacy")
-    return plan in ONLINE_ALLOWED
+
+    sub = db.subscriptions.find_one({"shop_id": shop_id})
+    return sub and sub.get("status") == "active"
 
 
-def ensure_idempotency(scope: dict, idempotency_key: str):
+# =========================
+# IDEMPOTENCY
+# =========================
+def ensure_idempotency(scope: dict, key: str):
     db = get_db()
-    key = db.idempotency_keys.find_one({"scope": scope, "key": idempotency_key})
-    if not key:
+    record = db.idempotency_keys.find_one({"scope": scope, "key": key})
+    if not record:
         return None
-    return db.orders.find_one({"_id": key["order_id"]})
+    return db.orders.find_one({"_id": record["order_id"]})
 
 
-def remember_idempotency(scope: dict, idempotency_key: str, order_id: str):
+def remember_idempotency(scope: dict, key: str, order_id: str):
     db = get_db()
     db.idempotency_keys.update_one(
-        {"scope": scope, "key": idempotency_key},
-        {"$set": {"scope": scope, "key": idempotency_key, "order_id": order_id}},
+        {"scope": scope, "key": key},
+        {"$set": {"scope": scope, "key": key, "order_id": order_id}},
         upsert=True,
     )
 
 
-def _update_credit_ledger(customer_id: str, shop_id: str, amount: float, order_id: str):
-    db = get_db()
-    existing = db.credit_customers.find_one({"customer_id": customer_id, "shop_id": shop_id})
-    if existing:
-        balance = existing.get("balance", 0.0) + amount
-        db.credit_customers.update_one({"_id": existing["_id"]}, {"$set": {"balance": round(balance, 2)}})
-        ledger_id = existing["_id"]
-    else:
-        ledger_id = str(uuid.uuid4())
-        db.credit_customers.insert_one(
-            {
-                "_id": ledger_id,
-                "customer_id": customer_id,
-                "shop_id": shop_id,
-                "balance": round(amount, 2),
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+# =========================
+# STOCK RESERVATION
+# =========================
+def reserve_stock(db, product_id: str, shop_id: str, qty: int):
+    product = db.products.find_one({"_id": product_id, "shop_id": shop_id})
+    if not product:
+        raise HTTPException(404, "Product not found")
 
-    db.credit_payments_history.insert_one(
+    updated = db.products.update_one(
         {
-            "_id": str(uuid.uuid4()),
-            "ledger_id": ledger_id,
-            "customer_id": customer_id,
+            "_id": product_id,
             "shop_id": shop_id,
-            "order_id": order_id,
-            "amount": round(amount, 2),
-            "type": "debit",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+            "stock": {"$gte": qty},
+        },
+        {"$inc": {"stock": -qty}},
     )
-    audit_log("credit_ledger_update", actor_id=customer_id, metadata={"shop_id": shop_id, "amount": amount})
+
+    if updated.modified_count == 0:
+        raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+
+    return product
 
 
-def checkout_customer(user: dict, payment_provider: str, idempotency_key: str, payment_method: str = "card", payment_meta: dict | None = None):
+# =========================
+# CUSTOMER CHECKOUT
+# =========================
+def checkout_customer(
+    user: dict,
+    payment_provider: str,
+    idempotency_key: str,
+    payment_method: str = "card",
+    payment_meta: dict | None = None,
+):
     db = get_db()
     scope = {"customer_id": user["_id"], "flow": "customer_checkout"}
-    if (existing := ensure_idempotency(scope, idempotency_key)):
+
+    if existing := ensure_idempotency(scope, idempotency_key):
         return existing
 
     cart = db.carts.find_one({"customer_id": user["_id"]})
     if not cart or not cart.get("items"):
-        raise HTTPException(status_code=400, detail="Cart is empty")
+        raise HTTPException(400, "Cart is empty")
 
-    shop_ids = set(i["shop_id"] for i in cart["items"])
-    if len(shop_ids) != 1:
-        raise HTTPException(status_code=400, detail="Cart must contain one shop only")
+    shop_id = cart["items"][0]["shop_id"]
 
-    shop_id = next(iter(shop_ids))
     if not shop_online_enabled(shop_id):
-        raise HTTPException(status_code=403, detail="Shop subscription blocks online checkout")
+        raise HTTPException(403, "Shop blocked")
 
-    total = 0.0
-    order_items = []
-    for item in cart["items"]:
-        product = db.products.find_one({"_id": item["product_id"]})
-        if not product:
-            raise HTTPException(status_code=404, detail=f"Product {item['product_id']} not found")
-        if product["stock"] < item["qty"]:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {product['name']}")
+    total = 0
+    items = []
 
-    for item in cart["items"]:
-        product = db.products.find_one({"_id": item["product_id"]})
-        updated = db.products.update_one(
-            {"_id": product["_id"], "stock": {"$gte": item["qty"]}},
-            {"$inc": {"stock": -item["qty"]}},
-        )
-        if updated.modified_count == 0:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {product['name']}")
+    for i in cart["items"]:
+        product = reserve_stock(db, i["product_id"], shop_id, i["qty"])
 
-        subtotal = product["price"] * item["qty"]
+        price = product.get("price", 0)
+        subtotal = price * i["qty"]
         total += subtotal
-        order_items.append(
-            {
-                "product_id": product["_id"],
-                "name": product["name"],
-                "qty": item["qty"],
-                "price": product["price"],
-                "subtotal": subtotal,
-            }
-        )
 
-    verification = verify_payment(payment_method, total, payment_meta)
+        items.append({
+            "product_id": product["_id"],
+            "name": product.get("name"),
+            "qty": i["qty"],
+            "price": price,
+            "subtotal": subtotal,
+        })
+
+    # =========================
+    # CREDIT SUPPORT
+    # =========================
+    if payment_method == "credit":
+        payment_status = "pending"
+        status = "credit"
+
+        db.debts.insert_one({
+            "_id": str(uuid.uuid4()),
+            "customer_id": user["_id"],
+            "shop_id": shop_id,
+            "amount": round2(total),
+            "status": "unpaid",
+            "created_at": now(),
+        })
+
+    else:
+        verification = verify_payment(payment_method, total, payment_meta)
+        payment_status = verification["status"]
+        status = "paid" if payment_status == "confirmed" else "created"
 
     order_id = str(uuid.uuid4())
-    order_doc = {
+
+    order = {
         "_id": order_id,
         "customer_id": user["_id"],
         "shop_id": shop_id,
-        "items": order_items,
-        "total": round(total, 2),
-        "status": "paid" if verification["status"] == "confirmed" else "created",
-        "payment_status": verification["status"],
+        "items": items,
+        "total": round2(total),
+        "status": status,
+        "payment_status": payment_status,
         "payment_method": payment_method,
-        "idempotency_key": idempotency_key,
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now(),
     }
-    db.orders.insert_one(order_doc)
 
-    db.payments.insert_one(
-        {
-            "_id": str(uuid.uuid4()),
-            "order_id": order_id,
-            "provider": payment_provider,
-            "payment_method": payment_method,
-            "status": verification["status"],
-            "amount": round(total, 2),
-            "payment_meta": payment_meta or {},
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    if payment_method == "credit":
-        _update_credit_ledger(user["_id"], shop_id, round(total, 2), order_id)
+    db.orders.insert_one(order)
 
-    db.carts.update_one({"customer_id": user["_id"]}, {"$set": {"items": []}}, upsert=True)
     remember_idempotency(scope, idempotency_key, order_id)
-    audit_log("customer_checkout", actor_id=user["_id"], metadata={"order_id": order_id, "shop_id": shop_id})
-    return order_doc
+
+    # ✅ RECEIPT
+    receipt = build_receipt(order)
+
+    return {**order, "receipt": receipt}
 
 
+# =========================
+# POS CHECKOUT (FULL SYSTEM)
+# =========================
 def checkout_pos(
     operator: dict,
     shop_id: str,
@@ -167,70 +181,85 @@ def checkout_pos(
     payment_meta: dict | None = None,
 ):
     db = get_db()
-    if operator["role"] == "shopkeeper" and shop_id not in operator.get("assigned_shop_ids", []):
-        raise HTTPException(status_code=403, detail="Shopkeeper not assigned to this shop")
 
-    scope = {"shop_id": shop_id, "flow": "pos_checkout", "operator_id": operator["_id"]}
-    if (existing := ensure_idempotency(scope, idempotency_key)):
+    scope = {
+        "shop_id": shop_id,
+        "operator_id": operator["_id"],
+        "flow": "pos_checkout",
+    }
+
+    if existing := ensure_idempotency(scope, idempotency_key):
         return existing
 
+    total_base = 0
     order_items = []
-    subtotal_total = 0.0
-    for item in items:
-        product = db.products.find_one({"_id": item["product_id"], "shop_id": shop_id})
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        if product["stock"] < item["qty"]:
-            raise HTTPException(status_code=400, detail="Insufficient stock")
 
-    for item in items:
-        product = db.products.find_one({"_id": item["product_id"]})
-        updated = db.products.update_one(
-            {"_id": product["_id"], "stock": {"$gte": item["qty"]}},
-            {"$inc": {"stock": -item["qty"]}},
-        )
-        if updated.modified_count == 0:
-            raise HTTPException(status_code=400, detail="Insufficient stock")
+    for i in items:
+        product = reserve_stock(db, i["product_id"], shop_id, i["qty"])
 
-        subtotal = product["price"] * item["qty"]
-        subtotal_total += subtotal
-        order_items.append({"product_id": product["_id"], "qty": item["qty"], "price": product["price"], "subtotal": subtotal})
+        price = product.get("price", 0)
+        subtotal = price * i["qty"]
+        total_base += subtotal
 
-    tax_amount = (tax_percent / 100.0) * subtotal_total
-    total = max(round(subtotal_total + tax_amount - discount, 2), 0)
-    verification = verify_payment(payment_method, total, payment_meta)
+        order_items.append({
+            "product_id": product["_id"],
+            "name": product.get("name"),
+            "qty": i["qty"],
+            "price": price,
+            "subtotal": subtotal,
+        })
+
+    tax = (tax_percent / 100) * total_base
+    total = max(total_base + tax - discount, 0)
+
+    # =========================
+    # CREDIT (KEY FEATURE)
+    # =========================
+    if payment_method == "credit":
+        payment_status = "pending"
+        status = "credit"
+
+        db.debts.insert_one({
+            "_id": str(uuid.uuid4()),
+            "shop_id": shop_id,
+            "amount": round2(total),
+            "status": "unpaid",
+            "created_at": now(),
+        })
+
+    else:
+        verification = verify_payment(payment_method, total, payment_meta)
+        payment_status = verification["status"]
+        status = "paid" if payment_status == "confirmed" else "created"
 
     order_id = str(uuid.uuid4())
-    order_doc = {
+
+    order = {
         "_id": order_id,
-        "customer_id": None,
         "shop_id": shop_id,
         "items": order_items,
-        "subtotal": round(subtotal_total, 2),
-        "tax_percent": tax_percent,
-        "tax_amount": round(tax_amount, 2),
-        "discount": round(discount, 2),
-        "total": total,
-        "status": "paid" if verification["status"] == "confirmed" else "created",
-        "payment_status": verification["status"],
+        "subtotal": round2(total_base),
+        "tax": round2(tax),
+        "discount": round2(discount),
+        "total": round2(total),
+        "status": status,
+        "payment_status": payment_status,
         "payment_method": payment_method,
-        "idempotency_key": idempotency_key,
-        "created_at": datetime.now(timezone.utc).isoformat(),
         "created_by": operator["_id"],
+        "created_at": now(),
     }
-    db.orders.insert_one(order_doc)
 
-    db.payments.insert_one(
-        {
-            "_id": str(uuid.uuid4()),
-            "order_id": order_id,
-            "provider": payment_provider,
-            "payment_method": payment_method,
-            "status": verification["status"],
-            "amount": total,
-            "payment_meta": payment_meta or {},
-        }
-    )
+    db.orders.insert_one(order)
+
     remember_idempotency(scope, idempotency_key, order_id)
-    audit_log("pos_checkout", actor_id=operator["_id"], metadata={"order_id": order_id, "shop_id": shop_id})
-    return order_doc
+
+    # ✅ RECEIPT SYSTEM
+    receipt = build_receipt(order)
+
+    audit_log(
+        "pos_checkout",
+        actor_id=operator["_id"],
+        metadata={"order_id": order_id},
+    )
+
+    return {**order, "receipt": receipt}

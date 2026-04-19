@@ -1,111 +1,104 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
-from backend.core.deps import require_roles
-from backend.schemas.product import ProductCreate, ProductUpdate, CategoryCreate
+from backend.services.visibility import is_product_visible
 from backend.services.safe_query import safe_str
-import uuid
 
-router = APIRouter(prefix="/api/products", tags=["products"])
+router = APIRouter(prefix="/api/public", tags=["public"])
 
 
 # =========================
-# LIST PRODUCTS (SHOP SCOPED + AUTH)
+# 📂 CATEGORIES (ONLY VALID ONLINE SHOPS)
 # =========================
-@router.get("")
-def list_products(
-    q: str | None = Query(default=None),
-    barcode: str | None = Query(default=None),
+@router.get("/categories")
+def list_public_categories():
+    db = get_db()
+
+    categories = db.shops.distinct(
+        "category",
+        {
+            "online_enabled": True,
+            "category": {"$ne": None}
+        }
+    )
+
+    # remove null/empty values
+    return [c for c in categories if c]
+
+
+# =========================
+# 🏪 SHOPS BY CATEGORY
+# =========================
+@router.get("/shops")
+def list_public_shops(category: str | None = Query(default=None)):
+    db = get_db()
+
+    filters = {
+        "online_enabled": True,
+        "category": {"$ne": None}
+    }
+
+    if category:
+        filters["category"] = category
+
+    return list(db.shops.find(filters))
+
+
+# =========================
+# 📦 PRODUCTS (FINAL MARKETPLACE ENGINE)
+# =========================
+@router.get("/products")
+def list_public_products(
+    category: str | None = Query(default=None),
     shop_id: str | None = Query(default=None),
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper", "customer"))
+    q: str | None = Query(default=None),
 ):
     db = get_db()
 
-    if not shop_id:
-        raise HTTPException(status_code=400, detail="shop_id is required")
+    # =========================
+    # 1. FILTER VALID ONLINE SHOPS
+    # =========================
+    shop_filter = {
+        "online_enabled": True,
+        "category": {"$ne": None}
+    }
 
-    filters = {"shop_id": shop_id}
+    if category:
+        shop_filter["category"] = category
 
-    if barcode:
-        filters["barcode"] = safe_str(barcode, "barcode")
+    if shop_id:
+        shop_filter["_id"] = shop_id
+
+    shops = list(db.shops.find(shop_filter, {"_id": 1, "category": 1, "online_enabled": 1}))
+    if not shops:
+        return []
+
+    shop_map = {s["_id"]: s for s in shops}
+    shop_ids = list(shop_map.keys())
+
+    # =========================
+    # 2. FILTER PRODUCTS (LIGHT QUERY)
+    # =========================
+    product_filter = {
+        "shop_id": {"$in": shop_ids}
+    }
 
     if q:
         q = safe_str(q, "q")
-        filters["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"description": {"$regex": q, "$options": "i"}}
-        ]
+        product_filter["name"] = {"$regex": q, "$options": "i"}
 
-    return list(db.products.find(filters))
+    products = db.products.find(product_filter)
 
+    # =========================
+    # 3. FINAL VISIBILITY ENGINE
+    # =========================
+    result = []
 
-# =========================
-# CREATE PRODUCT
-# =========================
-@router.post("", dependencies=[Depends(require_roles("owner", "admin", "partner", "shopkeeper"))])
-def create_product(
-    payload: ProductCreate,
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))
-):
-    db = get_db()
+    for p in products:
+        shop = shop_map.get(p["shop_id"])
+        if not shop:
+            continue
 
-    doc = payload.model_dump()
-    doc["_id"] = str(uuid.uuid4())
+        if is_product_visible(p, shop, mode="marketplace"):
+            result.append(p)
 
-    db.products.insert_one(doc)
-    return doc
-
-
-# =========================
-# UPDATE PRODUCT
-# =========================
-@router.put("/{product_id}", dependencies=[Depends(require_roles("owner", "admin", "partner", "shopkeeper"))])
-def update_product(product_id: str, payload: ProductUpdate):
-    db = get_db()
-
-    existing = db.products.find_one({"_id": product_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    data = {k: v for k, v in payload.model_dump().items() if v is not None}
-
-    db.products.update_one({"_id": product_id}, {"$set": data})
-
-    return db.products.find_one({"_id": product_id})
-
-
-# =========================
-# DELETE PRODUCT
-# =========================
-@router.delete("/{product_id}", dependencies=[Depends(require_roles("owner", "admin", "partner", "shopkeeper"))])
-def delete_product(product_id: str):
-    db = get_db()
-
-    existing = db.products.find_one({"_id": product_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    db.products.delete_one({"_id": product_id})
-
-    return {"message": "Deleted"}
-
-
-# =========================
-# CATEGORIES
-# =========================
-@router.get("/categories/list")
-def list_categories():
-    db = get_db()
-    return list(db.categories.find({}))
-
-
-@router.post("/categories/list", dependencies=[Depends(require_roles("owner", "admin", "partner", "shopkeeper"))])
-def create_category(payload: CategoryCreate):
-    db = get_db()
-
-    doc = {
-        "_id": str(uuid.uuid4()),
-        "name": payload.name
-    }
-
-    db.categories.insert_one(doc)
-    return doc
+    return result

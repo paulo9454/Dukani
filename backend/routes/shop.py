@@ -1,75 +1,100 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from backend.core.deps import require_roles
 from backend.db.mongo import get_db
-from backend.core.deps import get_current_user
-from datetime import datetime, timezone, timedelta
-import uuid
 
-router = APIRouter(prefix="/api/shops", tags=["shops"])
+router = APIRouter(prefix="/api/shop", tags=["shop"])
 
 
 # =========================
-# CREATE SHOP (OWNER ONLY)
+# 🏪 GET SHOP SETTINGS
 # =========================
-@router.post("/create")
-def create_shop(payload: dict, user=Depends(get_current_user)):
+@router.get("/{shop_id}/online-settings")
+def get_online_settings(
+    shop_id: str,
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+):
     db = get_db()
 
-    if user["role"] != "owner":
-        raise HTTPException(status_code=403, detail="Only owners can create shops")
-
-    shop_name = payload.get("name")
-
-    if not shop_name:
-        raise HTTPException(status_code=400, detail="Shop name required")
-
-    shop_id = str(uuid.uuid4())
-
-    db.shops.insert_one(
-        {
-            "_id": shop_id,
-            "owner_id": user["_id"],
-            "name": shop_name,
-
-            # 💰 per-shop subscription
-            "subscription_status": "trial",
-            "trial_start": datetime.now(timezone.utc).isoformat(),
-            "trial_end": (datetime.now(timezone.utc) + timedelta(days=14)).isoformat(),
-
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
 
     return {
         "shop_id": shop_id,
-        "name": shop_name,
-        "subscription_status": "trial",
+        "online_enabled": shop.get("online_enabled", False),
+        "category": shop.get("category"),
     }
 
 
 # =========================
-# 🔥 GET MY SHOPS (CRITICAL FIX)
+# 🚀 UPDATE ONLINE SETTINGS (FIXED)
 # =========================
-@router.get("/my-shops")
-def get_my_shops(user=Depends(get_current_user)):
+@router.put("/{shop_id}/online-settings")
+def update_online_settings(
+    shop_id: str,
+    payload: dict,
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+):
     db = get_db()
 
-    if user["role"] == "owner":
-        shops = list(
-            db.shops.find(
-                {"owner_id": user["_id"]},
-                {"_id": 1, "name": 1, "subscription_status": 1},
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # =========================
+    # ROLE CONTROL
+    # =========================
+    if user.get("role") == "shopkeeper":
+        if shop_id not in user.get("assigned_shop_ids", []):
+            raise HTTPException(status_code=403, detail="Not allowed for this shop")
+
+    online_enabled = payload.get("online_enabled", False)
+    category = payload.get("category")
+
+    # =========================
+    # VALIDATION (STRICT FIX)
+    # =========================
+    if online_enabled is True:
+        if not category:
+            raise HTTPException(
+                status_code=400,
+                detail="Category is required to activate online shop",
             )
-        )
 
-    elif user["role"] == "shopkeeper":
-        shops = list(
-            db.shops.find(
-                {"_id": {"$in": user.get("assigned_shop_ids", [])}},
-                {"_id": 1, "name": 1, "subscription_status": 1},
+        product_count = db.products.count_documents({
+            "shop_id": shop_id,
+            "is_public": True,
+        })
+
+        if product_count <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Add at least one public product before going online",
             )
-        )
 
-    else:
-        shops = []
+    # =========================
+    # BUILD UPDATE SAFE
+    # =========================
+    update_data = {
+        "online_enabled": bool(online_enabled),
+    }
 
-    return {"shops": shops}
+    # IMPORTANT: always enforce category when activating online
+    if online_enabled is True:
+        update_data["category"] = category
+
+    elif category is not None:
+        # allow category updates even if offline
+        update_data["category"] = category
+
+    db.shops.update_one(
+        {"_id": shop_id},
+        {"$set": update_data},
+    )
+
+    return {
+        "message": "Shop online settings updated",
+        "shop_id": shop_id,
+        "online_enabled": update_data["online_enabled"],
+        "category": update_data.get("category", shop.get("category")),
+    }

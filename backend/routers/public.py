@@ -1,32 +1,75 @@
 from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
 
-from backend.services.checkout import shop_online_enabled
-
-
-
 router = APIRouter(prefix="/api/public", tags=["public"])
 
 
+# =========================
+# HOME
+# =========================
+@router.get("/home")
+def home():
+    db = get_db()
+
+    shops = list(db.shops.find({"online_enabled": True}))
+    shop_ids = [s["_id"] for s in shops]
+
+    featured = list(db.products.find(
+        {
+            "is_public": True,
+            "is_online": True,
+            "shop_id": {"$in": shop_ids},
+        }
+    ).limit(8))
+
+    return {
+        "hero": "Welcome to Dukani",
+        "featured": featured
+    }
+
+
+# =========================
+# CATEGORIES
+# =========================
 @router.get("/categories")
-def list_public_categories():
+def categories():
     db = get_db()
-    return list(db.categories.find({}))
+
+    return db.shops.distinct(
+        "category",
+        {"online_enabled": True, "category": {"$ne": None}}
+    )
 
 
+# =========================
+# PRODUCTS (MARKETPLACE ONLY)
+# =========================
 @router.get("/products")
-def list_public_products(category: str | None = Query(default=None)):
+def public_products(
+    category: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+):
     db = get_db()
 
-    online_shop_ids = [s["_id"] for s in db.shops.find({}) if shop_online_enabled(s["_id"])]
-    filters = {"is_public": True, "shop_id": {"$in": online_shop_ids}}
+    shops = list(db.shops.find({"online_enabled": True}))
+    shop_ids = [s["_id"] for s in shops]
 
-    filters = {"is_public": True}
+    if not shop_ids:
+        return []
+
+    filters = {
+        "shop_id": {"$in": shop_ids},
+        "is_public": True,
+        "is_online": True,
+    }
 
     if category:
+        filters["category"] = category
+
+    if q:
         filters["$or"] = [
-            {"category": category},
-            {"category_id": category},
-            {"category_name": category},
+            {"name": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
         ]
+
     return list(db.products.find(filters))

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import API from "../api/client";
-import { checkout } from "../api/checkout";
 
 function Cart() {
   const [cart, setCart] = useState(null);
   const [products, setProducts] = useState({});
   const [loading, setLoading] = useState(true);
+  const [checkingOut, setCheckingOut] = useState(false);
 
   // =========================
   // GET CART
@@ -21,9 +21,8 @@ function Cart() {
   const fetchProducts = async () => {
     const res = await API.get("/api/public/products");
 
-    // convert to lookup map
     const map = {};
-    res.data.forEach((p) => {
+    (res.data || []).forEach((p) => {
       map[p._id] = p;
     });
 
@@ -48,23 +47,34 @@ function Cart() {
 
     load();
   }, []);
-  
+
+  // =========================
+  // CHECKOUT (FIXED)
+  // =========================
   const handleCheckout = async () => {
-  try {
-    const res = await checkout();
+    try {
+      setCheckingOut(true);
 
-    alert("✅ Order placed successfully!");
+      const payload = {
+        payment_provider: "manual",
+        payment_method: "cash",
+        payment_meta: {},
+        idempotency_key: Date.now().toString(),
+      };
 
-    console.log("Checkout response:", res);
+      const res = await API.post("/api/customer/checkout", payload);
 
-    // optional: refresh cart UI
-    setCart({ items: [] });
+      alert("✅ Order placed successfully!");
+      console.log("Checkout response:", res.data);
 
-  } catch (err) {
-    const msg = err?.response?.data?.detail || err.message;
-    alert("❌ Checkout failed: " + msg);
-  }
-};
+      setCart({ items: [] });
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err.message;
+      alert("❌ Checkout failed: " + msg);
+    } finally {
+      setCheckingOut(false);
+    }
+  };
 
   // =========================
   // REMOVE ITEM
@@ -86,7 +96,7 @@ function Cart() {
   // =========================
   if (loading) return <p>Loading cart...</p>;
 
-  if (!cart || cart.items.length === 0) {
+  if (!cart || !cart.items || cart.items.length === 0) {
     return <p>🛒 Your cart is empty</p>;
   }
 
@@ -117,7 +127,7 @@ function Cart() {
                 background: "#fafafa",
               }}
             >
-              <h3>{product?.name || "Loading product..."}</h3>
+              <h3>{product?.name || "Product unavailable"}</h3>
 
               <p>Qty: {item.qty}</p>
               <p>Price: KES {product?.price || 0}</p>
@@ -158,21 +168,22 @@ function Cart() {
       </div>
 
       {/* CHECKOUT */}
-<button
-  onClick={handleCheckout}
-  style={{
-    marginTop: "20px",
-    padding: "12px",
-    background: "green",
-    color: "white",
-    border: "none",
-    width: "100%",
-    cursor: "pointer",
-    fontSize: "16px",
-  }}
->
-  ✅ Checkout Now
-</button>
+      <button
+        onClick={handleCheckout}
+        disabled={checkingOut}
+        style={{
+          marginTop: "20px",
+          padding: "12px",
+          background: checkingOut ? "gray" : "green",
+          color: "white",
+          border: "none",
+          width: "100%",
+          cursor: "pointer",
+          fontSize: "16px",
+        }}
+      >
+        {checkingOut ? "Processing..." : "✅ Checkout Now"}
+      </button>
     </div>
   );
 }

@@ -1,28 +1,89 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.db.mongo import get_db
-from backend.services.checkout import shop_online_enabled
+from backend.core.deps import get_current_user, require_roles
+from backend.services.safe_query import safe_str
 
-router = APIRouter(prefix="/api/public", tags=["public"])
+router = APIRouter(prefix="/api/internal", tags=["internal"])
 
 
-@router.get("/home")
-def home():
+# =========================
+# 🏪 SHOP ACCESS (POS ONLY)
+# =========================
+@router.get("/shops")
+def list_pos_shops(
+    user=Depends(get_current_user),
+):
     db = get_db()
-    online_shop_ids = [s["_id"] for s in db.shops.find({}) if shop_online_enabled(s["_id"])]
-    featured = list(
-        db.products.find({"is_public": True, "shop_id": {"$in": online_shop_ids}}, {"_id": 1, "name": 1, "price": 1}).limit(8)
-    )
-    return {"hero": "Welcome to Dukani", "featured": featured}
+
+    if user["role"] == "shopkeeper":
+        shop_ids = user.get("assigned_shop_ids", [])
+        return list(db.shops.find({"_id": {"$in": shop_ids}}))
+
+    # owner/admin sees all shops
+    return list(db.shops.find({}))
 
 
-@router.get("/categories")
-def categories():
-    db = get_db()
-    return list(db.categories.find({}))
-
-
+# =========================
+# 📦 POS PRODUCTS (FULL INVENTORY VIEW)
+# =========================
 @router.get("/products")
-def public_products():
+def list_pos_products(
+    shop_id: str,
+    q: str | None = Query(default=None),
+    barcode: str | None = Query(default=None),
+    user=Depends(get_current_user),
+):
     db = get_db()
-    online_shop_ids = [s["_id"] for s in db.shops.find({}) if shop_online_enabled(s["_id"])]
-    return list(db.products.find({"is_public": True, "shop_id": {"$in": online_shop_ids}}))
+
+    # =========================
+    # SHOP VALIDATION
+    # =========================
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # =========================
+    # SHOPKEEPER LOCK
+    # =========================
+    if user["role"] == "shopkeeper":
+        if shop_id not in user.get("assigned_shop_ids", []):
+            raise HTTPException(status_code=403, detail="Not allowed for this shop")
+
+    # =========================
+    # BUILD FILTER
+    # =========================
+    filters = {"shop_id": shop_id}
+
+    if barcode:
+        filters["barcode"] = safe_str(barcode, "barcode")
+
+    if q:
+        q = safe_str(q, "q")
+        filters["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+        ]
+
+    # =========================
+    # POS RETURNS EVERYTHING IN STOCK SYSTEM
+    # (NO online/is_public FILTERS HERE)
+    # =========================
+    return list(db.products.find(filters))
+
+
+# =========================
+# 🔍 SINGLE PRODUCT LOOKUP (POS SCAN)
+# =========================
+@router.get("/products/{product_id}")
+def get_product(product_id: str, shop_id: str):
+    db = get_db()
+
+    product = db.products.find_one({
+        "_id": product_id,
+        "shop_id": shop_id
+    })
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    return product

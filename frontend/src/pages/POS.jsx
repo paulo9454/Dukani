@@ -30,9 +30,9 @@ function POS({ shopId: presetShopId }) {
     const load = async () => {
       try {
 
-        const data = await getProducts({ shop_id: effectiveShopId });
+        const shopToUse = presetShopId || shopId;
 
-        const data = await getProducts({ shop_id: presetShopId || shopId });
+const data = await getProducts({ shop_id: shopToUse });
 
         setProducts(data);
       } catch (err) {

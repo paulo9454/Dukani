@@ -1,12 +1,17 @@
 import { useState } from "react";
 import API from "../api/client";
 
-function Login({ onSwitch }) {
+function Login({ onSwitch, onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
+    if (!email || !password) {
+      alert("Please enter email and password");
+      return;
+    }
+
     try {
       setLoading(true);
 
@@ -15,7 +20,6 @@ function Login({ onSwitch }) {
         password,
       });
 
-      // ✅ backend-aligned structure
       const { access_token, refresh_token, user } = res.data;
 
       // 🔐 STORE AUTH DATA
@@ -25,10 +29,11 @@ function Login({ onSwitch }) {
 
       alert("✅ Login successful!");
 
-      console.log("TOKEN:", access_token);
-      console.log("USER:", user);
+      // ✅ IMPORTANT: notify App.jsx instead of reload
+      if (onLogin) {
+        onLogin({ access_token, user });
+      }
 
-      window.location.href = "/";
     } catch (err) {
       console.error(err);
       alert("❌ " + (err?.response?.data?.detail || "Login failed"));
@@ -70,7 +75,6 @@ function Login({ onSwitch }) {
         {loading ? "Logging in..." : "Login"}
       </button>
 
-      {/* 🔥 REGISTER SWITCH */}
       <p style={{ marginTop: "10px" }}>
         Don't have an account?{" "}
         <button

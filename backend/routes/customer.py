@@ -25,16 +25,17 @@ def get_cart(user=Depends(require_roles("customer"))):
         "customer_id": cart["customer_id"],
         "items": [
             {
-                "product_id": item["product_id"],
-                "qty": item["qty"]
+                "product_id": i["product_id"],
+                "qty": i["qty"],
+                "shop_id": i.get("shop_id")
             }
-            for item in cart.get("items", [])
+            for i in cart.get("items", [])
         ]
     }
 
 
 # =========================
-# 🛒 ADD TO CART
+# 🛒 ADD TO CART (SAFE + CONSISTENT)
 # =========================
 @router.post("/cart")
 def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
@@ -44,19 +45,25 @@ def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
-    cart = db.carts.find_one({"customer_id": user["_id"]}) or {
-        "customer_id": user["_id"],
-        "items": []
-    }
+    if product.get("stock", 0) < item.qty:
+        raise HTTPException(status_code=400, detail="Insufficient stock")
 
-    shop_ids = {i["shop_id"] for i in cart["items"]}
-    if shop_ids and product["shop_id"] not in shop_ids:
-        raise HTTPException(status_code=400, detail="Single-shop cart constraint")
+    cart = db.carts.find_one({"customer_id": user["_id"]})
+
+    if not cart:
+        cart = {"customer_id": user["_id"], "items": []}
+
+    # enforce single-shop rule
+    if cart["items"]:
+        existing_shop = cart["items"][0].get("shop_id")
+        if existing_shop and existing_shop != product["shop_id"]:
+            raise HTTPException(status_code=400, detail="Single-shop cart only")
 
     updated = False
-    for it in cart["items"]:
-        if it["product_id"] == item.product_id:
-            it["qty"] = item.qty
+
+    for i in cart["items"]:
+        if i["product_id"] == item.product_id:
+            i["qty"] = item.qty
             updated = True
             break
 
@@ -69,19 +76,16 @@ def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
 
     db.carts.update_one(
         {"customer_id": user["_id"]},
-        {"$set": cart},
+        {"$set": {
+            "customer_id": user["_id"],
+            "items": cart["items"]
+        }},
         upsert=True
     )
 
     return {
-        "customer_id": cart["customer_id"],
-        "items": [
-            {
-                "product_id": i["product_id"],
-                "qty": i["qty"]
-            }
-            for i in cart["items"]
-        ]
+        "customer_id": user["_id"],
+        "items": cart["items"]
     }
 
 
@@ -104,24 +108,21 @@ def remove_from_cart(product_id: str, user=Depends(require_roles("customer"))):
 
     db.carts.update_one(
         {"customer_id": user["_id"]},
-        {"$set": cart},
+        {"$set": {
+            "customer_id": user["_id"],
+            "items": cart["items"]
+        }},
         upsert=True
     )
 
     return {
-        "customer_id": cart["customer_id"],
-        "items": [
-            {
-                "product_id": i["product_id"],
-                "qty": i["qty"]
-            }
-            for i in cart["items"]
-        ]
+        "customer_id": user["_id"],
+        "items": cart["items"]
     }
 
 
 # =========================
-# 💳 CHECKOUT (UNCHANGED)
+# 💳 CHECKOUT
 # =========================
 @router.post("/checkout")
 def checkout(
@@ -149,15 +150,9 @@ def checkout(
 
 
 # =========================
-# 📦 ORDERS (NEW - SAFE ADDITION)
+# 📦 ORDERS
 # =========================
 @router.get("/orders")
 def get_orders(user=Depends(require_roles("customer"))):
     db = get_db()
-
-    orders = list(db.orders.find({"customer_id": user["_id"]}))
-
-    for o in orders:
-        o.pop("_id", None)
-
-    return orders
+    return list(db.orders.find({"customer_id": user["_id"]}))

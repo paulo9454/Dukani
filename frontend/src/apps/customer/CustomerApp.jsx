@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
 import API from "../../api/client";
-
-
-function CustomerApp() {
-
 import { addToCart } from "../../api/cart";
 import Cart from "../../pages/Cart";
 import Orders from "../../pages/Orders";
@@ -15,63 +11,99 @@ function CustomerApp() {
   const [category, setCategory] = useState("");
   const [products, setProducts] = useState([]);
 
+  // =========================
+  // LOAD CATEGORIES
+  // =========================
   useEffect(() => {
-    API.get("/api/public/categories").then((res) => setCategories(res.data || []));
+    API.get("/api/public/categories")
+      .then((res) => setCategories(res.data || []))
+      .catch((err) => console.error("Categories error:", err));
   }, []);
 
+  // =========================
+  // LOAD PRODUCTS
+  // =========================
   useEffect(() => {
-    API.get("/api/public/products", { params: category ? { category } : {} }).then((res) => setProducts(res.data || []));
+    API.get("/api/public/products", {
+      params: category ? { category } : {},
+    })
+      .then((res) => setProducts(res.data || []))
+      .catch((err) => console.error("Products error:", err));
   }, [category]);
+
+  // =========================
+  // ADD TO CART
+  // =========================
+  const handleAddToCart = async (productId) => {
+    try {
+      await addToCart(productId);
+      alert("Added to cart");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to add to cart");
+    }
+  };
 
   return (
     <div>
       <h2>Customer Marketplace</h2>
 
-      <p>Browse by category (public catalog only).</p>
-      <label>Category: </label>
-      <select value={category} onChange={(e) => setCategory(e.target.value)}>
-        <option value="">All</option>
-        {categories.map((c) => (
-          <option key={c._id} value={c.name}>{c.name}</option>
-        ))}
-      </select>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
-        {products.map((p) => (
-          <div key={p._id} style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8 }}>
-            <h4>{p.name}</h4>
-            <p>KES {p.price}</p>
-          </div>
-        ))}
-      </div>
-
+      {/* NAV */}
       <div style={{ marginBottom: 12 }}>
         <button onClick={() => setView("products")}>Products</button>{" "}
         <button onClick={() => setView("cart")}>Cart</button>{" "}
         <button onClick={() => setView("orders")}>Orders</button>
       </div>
+
+      {/* PRODUCTS VIEW */}
       {view === "products" && (
         <>
+          <p>Browse by category (public catalog only).</p>
+
           <label>Category: </label>
           <select value={category} onChange={(e) => setCategory(e.target.value)}>
             <option value="">All</option>
             {categories.map((c) => (
-              <option key={c._id} value={c.name}>{c.name}</option>
+              <option key={c._id} value={c.name}>
+                {c.name}
+              </option>
             ))}
           </select>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12, marginTop: 12 }}>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+              gap: 12,
+              marginTop: 12,
+            }}
+          >
             {products.map((p) => (
-              <div key={p._id} style={{ border: "1px solid #ddd", padding: 12, borderRadius: 8 }}>
+              <div
+                key={p._id}
+                style={{
+                  border: "1px solid #ddd",
+                  padding: 12,
+                  borderRadius: 8,
+                }}
+              >
                 <h4>{p.name}</h4>
                 <p>KES {p.price}</p>
-                <button onClick={() => addToCart(p._id)}>Add to Cart</button>
+
+                <button onClick={() => handleAddToCart(p._id)}>
+                  Add to Cart
+                </button>
               </div>
             ))}
           </div>
         </>
       )}
-      {view === "cart" && <Cart />}
-      {view === "orders" && <Orders />}
 
+      {/* CART VIEW */}
+      {view === "cart" && <Cart />}
+
+      {/* ORDERS VIEW */}
+      {view === "orders" && <Orders />}
     </div>
   );
 }

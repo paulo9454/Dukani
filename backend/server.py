@@ -13,6 +13,8 @@ from backend.routes import (
     damaged_stock,
     suppliers,
     notifications,
+    shop,
+    customer,  # ✅ FIX: added missing customer routes
 )
 from backend.routers import owner, pos, public
 from backend.db.mongo import get_db
@@ -66,6 +68,8 @@ for router in [
     damaged_stock.router,
     suppliers.router,
     notifications.router,
+    shop.router,
+    customer.router,  # ✅ FIX: mounted customer routes
 ]:
     app.include_router(router)
 
@@ -86,7 +90,7 @@ def custom_swagger_ui_html():
     <div id="swagger-ui"></div>
 
     <script src="/static/docs/swagger-ui-bundle.js"></script>
-    <script src="/static/docs/swagger-ui-standalone-preset.js"></script>  <!-- 🔥 THIS LINE -->
+    <script src="/static/docs/swagger-ui-standalone-preset.js"></script>
     <script src="/static/docs/swagger-initializer.js"></script>
 
   </body>
