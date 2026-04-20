@@ -8,7 +8,17 @@ router = APIRouter(prefix="/api/marketplace", tags=["marketplace"])
 @router.get("/vendors")
 def list_vendors():
     db = get_db()
-    return list(db.shops.find({}, {"_id": 1, "name": 1, "subscription_plan": 1}))
+    return list(
+        db.shops.find(
+            {
+                "$or": [
+                    {"online_enabled": True},
+                    {"is_public": True},
+                ]
+            },
+            {"_id": 1, "name": 1, "subscription_plan": 1, "online_enabled": 1, "is_public": 1},
+        )
+    )
 
 
 @router.get("/orders")

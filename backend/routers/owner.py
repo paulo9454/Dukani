@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
+from backend.schemas.shop import ShopCreateRequest
 import uuid
 
 router = APIRouter(prefix="/api/owner", tags=["owner"])
@@ -42,11 +43,14 @@ def list_owner_shops(user=Depends(require_roles("owner", "admin", "partner"))):
 # CREATE SHOP
 # =========================
 @router.post("/shops")
-def create_owner_shop(payload: dict, user=Depends(require_roles("owner", "admin", "partner"))):
+def create_owner_shop(
+    payload: ShopCreateRequest,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
     db = get_db()
 
-    name = (payload.get("name") or "").strip()
-    subscription_plan = payload.get("subscription_plan", "online")
+    name = payload.name.strip()
+    subscription_plan = payload.subscription_plan
 
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
@@ -60,6 +64,9 @@ def create_owner_shop(payload: dict, user=Depends(require_roles("owner", "admin"
         "subscription_plan": subscription_plan,
         "online_enabled": False,
         "category": None,
+        "latitude": payload.latitude,
+        "longitude": payload.longitude,
+        "address": payload.address,
     }
 
     db.shops.insert_one(shop_doc)

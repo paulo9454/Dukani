@@ -24,8 +24,3 @@ class Settings(BaseModel):
 
 
 settings = Settings()
-
-# ✅ DEBUG (KEEP TEMPORARILY)
-print("ENV FILE USED:", ENV_PATH)
-print("DB NAME LOADED:", settings.db_name)
-print("JWT SECRET IN USE:", settings.jwt_secret)
