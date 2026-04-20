@@ -27,10 +27,6 @@ def get_client():
 
 def get_db():
     db = get_client()[settings.db_name]
-
-    # ✅ DEBUG LINE (CONFIRMS ACTIVE DATABASE)
-    print("DB NAME IN USE:", db.name)
-
     return db
 
 

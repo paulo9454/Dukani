@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 from backend.db.mongo import get_db
+from backend.services.geo import haversine_km
 
 router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 
@@ -73,3 +74,43 @@ def public_products(
         ]
 
     return list(db.products.find(filters))
+
+
+@router.get("/shops/nearby")
+def nearby_shops(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+):
+    db = get_db()
+    shops = list(db.shops.find({"latitude": {"$exists": True}, "longitude": {"$exists": True}}))
+
+    ranked = []
+    for shop in shops:
+        try:
+            shop_lat = float(shop["latitude"])
+            shop_lng = float(shop["longitude"])
+        except (TypeError, ValueError):
+            continue
+
+        if not (-90 <= shop_lat <= 90 and -180 <= shop_lng <= 180):
+            continue
+
+        distance_km = haversine_km(
+            lat,
+            lng,
+            shop_lat,
+            shop_lng,
+        )
+        ranked.append(
+            {
+                "_id": shop.get("_id"),
+                "name": shop.get("name"),
+                "category": shop.get("category"),
+                "address": shop.get("address"),
+                "latitude": shop.get("latitude"),
+                "longitude": shop.get("longitude"),
+                "distance_km": round(distance_km, 3),
+            }
+        )
+
+    return sorted(ranked, key=lambda s: s["distance_km"])

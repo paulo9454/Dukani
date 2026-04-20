@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from backend.routes import (
+from backend.routers import (
     auth,
     marketplace,
     payments,
@@ -14,12 +14,13 @@ from backend.routes import (
     suppliers,
     notifications,
     shop,
-    customer,  # ✅ FIX: added missing customer routes
+    customer,
+    owner,
+    pos,
+    public,
 )
-from backend.routers import owner, pos, public
 from backend.db.mongo import get_db
 from backend.services.seed import seed_full_data
-from backend.core.settings import settings
 from backend.middleware.rate_limit import RateLimiterMiddleware
 from backend.middleware.security_headers import SecurityHeadersMiddleware
 import uuid
@@ -48,20 +49,11 @@ app.add_middleware(
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimiterMiddleware)
 
-for m in app.user_middleware:
-    if m.cls.__name__ == "RateLimiterMiddleware":
-        rate_limiter_middleware = m
-        break
-else:
-    rate_limiter_middleware = None
-
-# New router namespace first
+# Primary router namespace
 app.include_router(owner.router)
 app.include_router(pos.router, tags=["POS"])
 app.include_router(public.router)
-print("✅ POS router loaded")
 
-# Legacy routes second
 for router in [
     auth.router,
     marketplace.router,
@@ -100,25 +92,6 @@ def custom_swagger_ui_html():
   </body>
 </html>"""
     )
-
-
-@app.get("/docs", include_in_schema=False)
-def custom_swagger_ui_html():
-    return HTMLResponse("""
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Dukani API Docs</title>
-    <link rel="stylesheet" href="/static/docs/swagger-ui.css" />
-  </head>
-  <body>
-    <div id="swagger-ui"></div>
-
-    <script src="/static/docs/swagger-ui-bundle.js"></script>
-    <script src="/static/docs/swagger-initializer.js"></script>
-  </body>
-</html>
-""")
 
 
 @app.get("/docs/favicon.ico", include_in_schema=False)

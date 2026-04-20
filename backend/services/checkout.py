@@ -164,7 +164,7 @@ def checkout_customer(
     shop = db.shops.find_one({"_id": shop_id})
     if not shop:
         raise HTTPException(404, "Shop not found for receipt")
-    receipt = build_receipt(order, shop)
+    receipt = build_receipt(order, shop, operator=None)
 
     return {**order, "receipt": receipt}
 
@@ -182,6 +182,7 @@ def checkout_pos(
     discount: float = 0.0,
     tax_percent: float = 0.0,
     payment_meta: dict | None = None,
+    order_source: str = "physical",
 ):
     db = get_db()
 
@@ -219,6 +220,8 @@ def checkout_pos(
     # CREDIT (KEY FEATURE)
     # =========================
     if payment_method == "credit":
+        if order_source != "physical":
+            raise HTTPException(400, "Credit only allowed for physical shop")
         payment_status = "pending"
         status = "credit"
 
