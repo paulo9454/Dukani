@@ -35,11 +35,15 @@ def home():
 @router.get("/categories")
 def categories():
     db = get_db()
-
-    return db.shops.distinct(
+    categories = db.products.distinct(
         "category",
-        {"online_enabled": True, "category": {"$ne": None}}
+        {
+            "is_public": True,
+            "is_online": True,
+            "category": {"$nin": [None, ""]},
+        },
     )
+    return sorted(categories)
 
 
 # =========================
@@ -48,24 +52,18 @@ def categories():
 @router.get("/products")
 def public_products(
     category: str | None = Query(default=None),
+    shop_id: str | None = Query(default=None),
     q: str | None = Query(default=None),
 ):
     db = get_db()
 
-    shops = list(db.shops.find({"online_enabled": True}))
-    shop_ids = [s["_id"] for s in shops]
-
-    if not shop_ids:
-        return []
-
-    filters = {
-        "shop_id": {"$in": shop_ids},
-        "is_public": True,
-        "is_online": True,
-    }
+    filters = {"is_public": True, "is_online": True}
 
     if category:
         filters["category"] = category
+
+    if shop_id:
+        filters["shop_id"] = shop_id
 
     if q:
         filters["$or"] = [
@@ -73,7 +71,31 @@ def public_products(
             {"description": {"$regex": q, "$options": "i"}},
         ]
 
-    return list(db.products.find(filters))
+    products = list(db.products.find(filters))
+    if not products:
+        return []
+
+    candidate_shop_ids = list({p.get("shop_id") for p in products if p.get("shop_id")})
+    if not candidate_shop_ids:
+        return []
+
+    active_shops = list(
+        db.shops.find(
+            {
+                "_id": {"$in": candidate_shop_ids},
+                "$or": [
+                    {"online_enabled": True},
+                    {"is_public": True},
+                ],
+            },
+            {"_id": 1},
+        )
+    )
+    active_shop_ids = {s["_id"] for s in active_shops}
+    if not active_shop_ids:
+        return []
+
+    return [p for p in products if p.get("shop_id") in active_shop_ids]
 
 
 @router.get("/shops/nearby")
