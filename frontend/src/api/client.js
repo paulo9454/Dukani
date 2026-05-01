@@ -1,7 +1,9 @@
 import axios from "axios";
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "";
+
 const API = axios.create({
-  baseURL: "http://127.0.0.1:8000",
+  baseURL: BACKEND_URL,
   timeout: 15000,
   headers: {
     "Content-Type": "application/json",
@@ -50,7 +52,7 @@ API.interceptors.response.use(
 
       try {
         const res = await axios.post(
-          "http://127.0.0.1:8000/api/auth/refresh",
+          `${BACKEND_URL}/api/auth/refresh`,
           { refresh_token }
         );
 

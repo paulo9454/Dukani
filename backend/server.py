@@ -1,5 +1,12 @@
 import os
+import sys
 import uuid
+
+# Ensure repo root (parent of /app/backend) is on sys.path so `from backend.X` imports work
+# regardless of current working directory (supervisor runs uvicorn from /app/backend).
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,7 +54,6 @@ app = FastAPI(
     redoc_url=None,
 )
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # =========================

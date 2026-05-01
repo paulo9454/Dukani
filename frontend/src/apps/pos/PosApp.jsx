@@ -130,7 +130,7 @@ const loadCategories = useCallback(async () => {
   // ✅ attach backend URL
   if (img.startsWith("http")) return img;
 
-  return `http://localhost:8000${img}`;
+  return `${import.meta.env.VITE_BACKEND_URL || ""}${img}`;
 };
   const add = (product) => {
     const price = getPrice(product);
