@@ -5,48 +5,32 @@ from backend.db.mongo import get_db
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-# =========================
-# 📊 OWNER DASHBOARD OVERVIEW (FIXED REVENUE)
-# =========================
 @router.get("/overview")
-def dashboard_overview(user=Depends(require_roles("admin","owner"))):
+def dashboard_overview(user=Depends(require_roles("admin", "owner"))):
     db = get_db()
 
-    # =========================
-    # GET SHOPS
-    # =========================
-    shops = list(db.shops.find({}, {"_id": 1}))
+    if user["role"] == "admin":
+        shops = list(db.shops.find({}, {"_id": 1, "subscription_plan": 1}))
+        payments_query = {}
+        subscriptions_query = {"status": "active"}
+    else:
+        shops = list(db.shops.find({"owner_id": user["_id"]}, {"_id": 1, "subscription_plan": 1}))
+        shop_ids = [s["_id"] for s in shops]
+        payments_query = {"shop_id": {"$in": shop_ids}}
+        subscriptions_query = {"status": "active", "shop_id": {"$in": shop_ids}}
+
     shop_ids = [s["_id"] for s in shops]
+    orders = list(db.orders.find({"shop_id": {"$in": shop_ids}, "payment_status": "confirmed"}))
+    payments = list(db.payments.find(payments_query))
+    active_subscriptions = db.subscriptions.count_documents(subscriptions_query)
 
-    # =========================
-    # GET ORDERS (ONLY CONFIRMED)
-    # =========================
-    orders = list(
-        db.orders.find({
-            "shop_id": {"$in": shop_ids},
-            "payment_status": "confirmed"
-        })
-    )
-
-    payments = list(db.payments.find({}))
-    active_subscriptions = db.subscriptions.count_documents({"status": "active"})
-
-    # =========================
-    # PLAN BREAKDOWN
-    # =========================
     plan_breakdown = {
         "pos": sum(1 for s in shops if s.get("subscription_plan") == "pos"),
         "online": sum(1 for s in shops if s.get("subscription_plan") == "online"),
         "legacy": sum(1 for s in shops if s.get("subscription_plan") == "legacy"),
     }
 
-    # =========================
-    # 💰 FIXED REVENUE CALCULATION
-    # =========================
-    revenue = sum(
-        float(o.get("total", 0)) for o in orders
-        if o.get("payment_status") == "confirmed"
-    )
+    revenue = sum(float(o.get("total", 0)) for o in orders if o.get("payment_status") == "confirmed")
 
     return {
         "shops": len(shops),
@@ -58,9 +42,6 @@ def dashboard_overview(user=Depends(require_roles("admin","owner"))):
     }
 
 
-# =========================
-# 🧾 ADMIN DASHBOARD
-# =========================
 @router.get("/admin")
 def admin_dashboard(user=Depends(require_roles("admin"))):
     db = get_db()
@@ -72,32 +53,12 @@ def admin_dashboard(user=Depends(require_roles("admin"))):
     }
 
 
-# =========================
-# 🏪 SHOPS LIST
-# =========================
 @router.get("/shops")
 def list_shops(user=Depends(require_roles("admin"))):
     db = get_db()
-    return list(
-        db.shops.find(
-            {},
-            {
-                "_id": 1,
-                "name": 1,
-                "owner_id": 1,
-                "subscription_plan": 1,
-                "online_enabled": 1,
-                "category": 1,
-                "latitude": 1,
-                "longitude": 1,
-            },
-        )
-    )
+    return list(db.shops.find({}, {"_id": 1, "name": 1, "owner_id": 1, "subscription_plan": 1, "online_enabled": 1, "category": 1, "latitude": 1, "longitude": 1}))
 
 
-# =========================
-# 💳 SUBSCRIPTIONS
-# =========================
 @router.get("/subscriptions")
 def subscription_overview(user=Depends(require_roles("admin"))):
     db = get_db()

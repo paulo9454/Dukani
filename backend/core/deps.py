@@ -75,8 +75,6 @@ def require_shop_access(shop_id: str, user: dict):
 
     # 🔐 SHOPKEEPER MUST BE ASSIGNED VIA COLLECTION (NOT USER FIELD)
     if user["role"] == "shopkeeper":
-        db.assignments = db.assignments if hasattr(db, "assignments") else db["assignments"]
-
         assignment = db.assignments.find_one({
             "shop_id": shop_id,
             "shopkeeper_id": user["_id"]
