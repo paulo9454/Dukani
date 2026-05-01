@@ -20,9 +20,17 @@ function AssignShopkeepers() {
   // LOAD SHOPS
   // =========================
   useEffect(() => {
-    API.get("/api/dashboard/shops")
-      .then((res) => setShops(res.data || []))
-      .catch((err) => console.error(err));
+    const loadShops = async () => {
+      try {
+        const res = await API.get("/api/owner/shops");
+        setShops(res.data || []);
+      } catch (err) {
+        console.error("Load shops error:", err);
+        setShops([]);
+      }
+    };
+
+    loadShops();
   }, []);
 
   // =========================
@@ -33,7 +41,7 @@ function AssignShopkeepers() {
       const res = await API.get("/api/owner/shopkeepers");
       setUsers(res.data || []);
     } catch (err) {
-      console.error(err);
+      console.error("Load shopkeepers error:", err);
       setUsers([]);
     }
   };
@@ -43,39 +51,43 @@ function AssignShopkeepers() {
   }, []);
 
   // =========================
-  // LOAD ASSIGNMENTS
+  // LOAD ASSIGNMENTS (SOURCE OF TRUTH)
   // =========================
   const loadAssignments = async (shopId) => {
-    if (!shopId) return setAssignments([]);
+    if (!shopId) {
+      setAssignments([]);
+      return;
+    }
 
     try {
-      const res = await API.get(
-        `/api/owner/shops/${shopId}/assignments`
-      );
-
+      const res = await API.get(`/api/owner/shops/${shopId}/assignments`);
       setAssignments(res.data?.assignments || []);
     } catch (err) {
-      console.error(err);
+      console.error("Load assignments error:", err);
       setAssignments([]);
     }
   };
 
   const handleShopChange = (shopId) => {
     setSelectedShop(shopId);
-    setAssignments([]);
     loadAssignments(shopId);
   };
 
   // =========================
-  // SAFE ID PICKER
+  // CHECK ASSIGNED (FIXED)
   // =========================
-  const getUserId = (u) => u?._id || u?.id;
+  const isAssigned = (userId) => {
+    return assignments.some((a) => a.shopkeeper_id === userId);
+  };
 
   // =========================
   // ASSIGN USER
   // =========================
   const assignUser = async (userId) => {
-    if (!selectedShop) return alert("Select a shop first");
+    if (!selectedShop) {
+      alert("Select a shop first");
+      return;
+    }
 
     try {
       setLoading(true);
@@ -87,7 +99,7 @@ function AssignShopkeepers() {
       await loadShopkeepers();
       await loadAssignments(selectedShop);
     } catch (err) {
-      console.error(err);
+      console.error("Assign error:", err);
       alert(err?.response?.data?.detail || "Assignment failed");
     } finally {
       setLoading(false);
@@ -98,36 +110,32 @@ function AssignShopkeepers() {
   // CREATE SHOPKEEPER
   // =========================
   const createShopkeeper = async () => {
-    if (
-      !newShopkeeper.full_name ||
-      !newShopkeeper.email ||
-      !newShopkeeper.password
-    ) {
-      return alert("Fill all fields");
+    const { full_name, email, password } = newShopkeeper;
+
+    if (!full_name || !email || !password) {
+      alert("Fill all fields");
+      return;
     }
 
     try {
       setLoading(true);
 
-      const res = await API.post("/api/auth/register", {
-        full_name: newShopkeeper.full_name,
-        email: newShopkeeper.email,
-        password: newShopkeeper.password,
+      await API.post("/api/auth/register", {
+        full_name,
+        email,
+        password,
         role: "shopkeeper",
       });
 
-      const newUserId = res.data?.user?.id || res.data?.id;
-
       await loadShopkeepers();
 
-      // ⚡ AUTO ASSIGN (if shop selected)
-      if (selectedShop && newUserId) {
-        await assignUser(newUserId);
-      }
-
-      setNewShopkeeper({ full_name: "", email: "", password: "" });
+      setNewShopkeeper({
+        full_name: "",
+        email: "",
+        password: "",
+      });
     } catch (err) {
-      console.error(err);
+      console.error("Create shopkeeper error:", err);
       alert("Failed to create shopkeeper");
     } finally {
       setLoading(false);
@@ -135,7 +143,7 @@ function AssignShopkeepers() {
   };
 
   // =========================
-  // UNASSIGN (FRONTEND READY)
+  // UNASSIGN USER
   // =========================
   const unassignUser = async (userId) => {
     if (!selectedShop) return;
@@ -150,18 +158,27 @@ function AssignShopkeepers() {
       await loadShopkeepers();
       await loadAssignments(selectedShop);
     } catch (err) {
-      console.warn("Unassign not implemented yet", err);
-      alert("Unassign endpoint not ready");
+      console.error("Unassign error:", err);
+      alert("Unassign failed");
     } finally {
       setLoading(false);
     }
   };
 
+  // =========================
+  // FILTER USERS
+  // =========================
+  const filteredUsers = users.filter((u) =>
+    `${u.full_name || u.name || ""} ${u.email || ""}`
+      .toLowerCase()
+      .includes(search.toLowerCase())
+  );
+
   return (
     <div style={{ marginTop: 20 }}>
       <h3>👥 Assign Shopkeepers</h3>
 
-      {/* CREATE */}
+      {/* CREATE SHOPKEEPER */}
       <div style={{ padding: 10, border: "1px solid #ddd", marginBottom: 15 }}>
         <h4>➕ Add Shopkeeper</h4>
 
@@ -196,10 +213,7 @@ function AssignShopkeepers() {
       </div>
 
       {/* SHOP SELECT */}
-      <select
-        value={selectedShop}
-        onChange={(e) => handleShopChange(e.target.value)}
-      >
+      <select value={selectedShop} onChange={(e) => handleShopChange(e.target.value)}>
         <option value="">-- Select Shop --</option>
         {shops.map((s) => (
           <option key={s._id} value={s._id}>
@@ -220,56 +234,47 @@ function AssignShopkeepers() {
       <div style={{ marginTop: 15 }}>
         <h4>Available Shopkeepers</h4>
 
-        {users
-          .filter((u) =>
-            (u.full_name || u.name || "")
-              .toLowerCase()
-              .includes(search.toLowerCase())
-          )
-          .map((u) => {
-            const userId = getUserId(u);
-            const isAssigned =
-              u.assigned_shop_ids?.includes(selectedShop);
+        {filteredUsers.map((u) => {
+          const assigned = isAssigned(u._id);
 
-            return (
-              <div
-                key={userId}
-                style={{
-                  border: "1px solid #eee",
-                  padding: 10,
-                  marginBottom: 8,
-                  borderRadius: 6,
-                  background: isAssigned ? "#f0fff4" : "#fff",
-                }}
-              >
-                <p>
-                  <strong>{u.full_name || u.name}</strong> ({u.email})
+          return (
+            <div
+              key={u._id}
+              style={{
+                border: "1px solid #eee",
+                padding: 10,
+                marginBottom: 8,
+                borderRadius: 6,
+              }}
+            >
+              <p>
+                <strong>{u.full_name || u.name}</strong> ({u.email})
 
-                  {isAssigned && (
-                    <span style={{ color: "green", marginLeft: 10 }}>
-                      🟢 Assigned
-                    </span>
-                  )}
-                </p>
-
-                <button
-                  disabled={loading}
-                  onClick={() => assignUser(userId)}
-                >
-                  ➕ Assign
-                </button>
-
-                {isAssigned && (
-                  <button
-                    style={{ marginLeft: 10, color: "red" }}
-                    onClick={() => unassignUser(userId)}
-                  >
-                    ❌ Unassign
-                  </button>
+                {assigned && (
+                  <span style={{ color: "green", marginLeft: 10 }}>
+                    🟢 Assigned
+                  </span>
                 )}
-              </div>
-            );
-          })}
+              </p>
+
+              <button
+                disabled={loading || assigned || !selectedShop}
+                onClick={() => assignUser(u._id)}
+              >
+                ➕ Assign
+              </button>
+
+              {assigned && (
+                <button
+                  style={{ marginLeft: 10, color: "red" }}
+                  onClick={() => unassignUser(u._id)}
+                >
+                  ❌ Unassign
+                </button>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* ASSIGNMENTS */}
@@ -280,8 +285,8 @@ function AssignShopkeepers() {
           <p>No assignments</p>
         ) : (
           assignments.map((a) => (
-            <div key={a._id || a.email}>
-              👤 {a.full_name || a.name} ({a.email})
+            <div key={a._id}>
+              👤 {a.shopkeeper_name || a.name} ({a.shopkeeper_email})
             </div>
           ))
         )}

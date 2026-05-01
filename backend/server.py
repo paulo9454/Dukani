@@ -1,8 +1,16 @@
 import os
+import uuid
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from backend.routers import categories
+from backend.db.mongo import get_db
+from backend.services.seed import seed_full_data
+from backend.middleware.rate_limit import RateLimiterMiddleware
+from backend.middleware.security_headers import SecurityHeadersMiddleware
+
 from backend.routers import (
     auth,
     marketplace,
@@ -18,12 +26,14 @@ from backend.routers import (
     owner,
     pos,
     public,
+    products,
+    orders
 )
-from backend.db.mongo import get_db
-from backend.services.seed import seed_full_data
-from backend.middleware.rate_limit import RateLimiterMiddleware
-from backend.middleware.security_headers import SecurityHeadersMiddleware
-import uuid
+
+# =========================
+# ✅ ADDED INVENTORY ROUTER
+# =========================
+from backend.routers.inventory import router as inventory_router
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -37,39 +47,52 @@ app = FastAPI(
     redoc_url=None,
 )
 
+app.mount("/static", StaticFiles(directory="static"), name="static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# =========================
+# MIDDLEWARE
+# =========================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 🔥 allow everything (dev only)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(RateLimiterMiddleware)
 
-# Primary router namespace
+# =========================
+# ROUTES
+# =========================
 app.include_router(owner.router)
 app.include_router(pos.router, tags=["POS"])
 app.include_router(public.router)
 
-for router in [
-    auth.router,
-    marketplace.router,
-    payments.router,
-    dashboard.router,
-    credit.router,
-    credit_history.router,
-    damaged_stock.router,
-    suppliers.router,
-    notifications.router,
-    shop.router,
-    customer.router,  # customer cart/order views only (checkout is POS-owned)
-]:
-    app.include_router(router)
+app.include_router(auth.router)
+app.include_router(marketplace.router)
+app.include_router(payments.router)
+app.include_router(dashboard.router)
+app.include_router(credit.router)
+app.include_router(credit_history.router)
+app.include_router(damaged_stock.router)
+app.include_router(suppliers.router)
+app.include_router(notifications.router)
+app.include_router(shop.router)
+app.include_router(customer.router)
+app.include_router(categories.router)
+app.include_router(products.router)
+app.include_router(orders.router)
+# =========================
+# ✅ INVENTORY ROUTER ADDED
+# =========================
+app.include_router(inventory_router)
 
-
+# =========================
+# DOCS UI
+# =========================
 @app.get("/docs", include_in_schema=False)
 def custom_swagger_ui_html():
     return HTMLResponse(
@@ -93,25 +116,31 @@ def custom_swagger_ui_html():
 </html>"""
     )
 
-
 @app.get("/docs/favicon.ico", include_in_schema=False)
 def docs_favicon():
-    return FileResponse(os.path.join(DOCS_DIR, "logo.svg"), media_type="image/svg+xml")
+    return FileResponse(
+        os.path.join(DOCS_DIR, "logo.svg"),
+        media_type="image/svg+xml"
+    )
 
-
+# =========================
+# HEALTH CHECK
+# =========================
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
-
+# =========================
+# DEV SEED
+# =========================
 @app.post("/api/dev/seed")
 def seed_data():
     db = get_db()
+
     if db.categories.count_documents({}) == 0:
-        db.categories.insert_many(
-            [
-                {"_id": str(uuid.uuid4()), "name": "Electronics"},
-                {"_id": str(uuid.uuid4()), "name": "Fashion"},
-            ]
-        )
+        db.categories.insert_many([
+            {"_id": str(uuid.uuid4()), "name": "Electronics"},
+            {"_id": str(uuid.uuid4()), "name": "Fashion"},
+        ])
+
     return seed_full_data()

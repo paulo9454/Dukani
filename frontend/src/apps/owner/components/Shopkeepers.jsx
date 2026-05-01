@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../../../api/client";
+import { getOwnerShops } from "../../../api/shops";
 
 function Shopkeepers() {
   const [users, setUsers] = useState([]);
@@ -8,6 +9,7 @@ function Shopkeepers() {
 
   const [selectedShop, setSelectedShop] = useState("");
   const [shops, setShops] = useState([]);
+  const [assignments, setAssignments] = useState([]);
 
   // =========================
   // LOAD USERS
@@ -18,6 +20,7 @@ function Shopkeepers() {
       setUsers(res.data || []);
     } catch (err) {
       console.error(err);
+      setUsers([]);
     }
   };
 
@@ -26,10 +29,29 @@ function Shopkeepers() {
   // =========================
   const loadShops = async () => {
     try {
-      const res = await API.get("/api/dashboard/shops");
-      setShops(res.data || []);
+      const data = await getOwnerShops();
+      setShops(Array.isArray(data) ? data : data?.data || []);
     } catch (err) {
       console.error(err);
+      setShops([]);
+    }
+  };
+
+  // =========================
+  // LOAD ASSIGNMENTS (SOURCE OF TRUTH)
+  // =========================
+  const loadAssignments = async (shopId) => {
+    if (!shopId) {
+      setAssignments([]);
+      return;
+    }
+
+    try {
+      const res = await API.get(`/api/owner/shops/${shopId}/assignments`);
+      setAssignments(res.data?.assignments || []);
+    } catch (err) {
+      console.error(err);
+      setAssignments([]);
     }
   };
 
@@ -37,6 +59,18 @@ function Shopkeepers() {
     loadUsers();
     loadShops();
   }, []);
+
+  const handleShopChange = (shopId) => {
+    setSelectedShop(shopId);
+    loadAssignments(shopId);
+  };
+
+  // =========================
+  // CHECK ASSIGNED (FIXED)
+  // =========================
+  const isAssigned = (userId) => {
+    return assignments.some((a) => a.shopkeeper_id === userId);
+  };
 
   // =========================
   // ASSIGN USER
@@ -54,10 +88,12 @@ function Shopkeepers() {
         `/api/owner/shops/${selectedShop}/shopkeepers/${userId}`
       );
 
-      alert("✅ Assigned successfully");
+      await loadAssignments(selectedShop);
+      await loadUsers();
 
-      loadUsers();
+      alert("✅ Assigned successfully");
     } catch (err) {
+      console.error(err);
       alert(err?.response?.data?.detail || "Assignment failed");
     } finally {
       setLoading(false);
@@ -68,7 +104,7 @@ function Shopkeepers() {
   // FILTER USERS
   // =========================
   const filteredUsers = users.filter((u) =>
-    `${u.full_name || u.name || ""} ${u.email}`
+    `${u.full_name || u.name || ""} ${u.email || ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -77,13 +113,11 @@ function Shopkeepers() {
     <div>
       <h2 style={{ marginBottom: 15 }}>👥 Shopkeepers Management</h2>
 
-      {/* =========================
-          SHOP SELECT
-      ========================= */}
+      {/* SHOP SELECT */}
       <div style={{ marginBottom: 15 }}>
         <select
           value={selectedShop}
-          onChange={(e) => setSelectedShop(e.target.value)}
+          onChange={(e) => handleShopChange(e.target.value)}
           style={{
             padding: 8,
             width: "100%",
@@ -100,9 +134,7 @@ function Shopkeepers() {
         </select>
       </div>
 
-      {/* =========================
-          SEARCH BAR
-      ========================= */}
+      {/* SEARCH */}
       <input
         placeholder="Search shopkeepers..."
         value={search}
@@ -116,21 +148,11 @@ function Shopkeepers() {
         }}
       />
 
-      {/* =========================
-          LOADING STATE
-      ========================= */}
-      {loading && (
-        <p style={{ color: "gray" }}>Processing request...</p>
-      )}
+      {loading && <p style={{ color: "gray" }}>Processing request...</p>}
 
-      {/* =========================
-          LIST
-      ========================= */}
+      {/* USERS LIST */}
       {filteredUsers.map((u) => {
-        const assigned =
-          Array.isArray(u.assigned_shop_ids) &&
-          selectedShop &&
-          u.assigned_shop_ids.includes(selectedShop);
+        const assigned = isAssigned(u._id);
 
         return (
           <div
@@ -146,12 +168,10 @@ function Shopkeepers() {
               background: "#fff",
             }}
           >
-            {/* INFO */}
             <div>
               <strong>{u.full_name || u.name || "No Name"}</strong>
               <p style={{ margin: 0, color: "gray" }}>{u.email}</p>
 
-              {/* BADGE */}
               <span
                 style={{
                   display: "inline-block",
@@ -167,20 +187,16 @@ function Shopkeepers() {
               </span>
             </div>
 
-            {/* ACTIONS */}
-            <div>
-              <button
-                disabled={loading || assigned || !selectedShop}
-                onClick={() => assignUser(u._id)}
-                style={{
-                  padding: "8px 10px",
-                  marginRight: 8,
-                  cursor: "pointer",
-                }}
-              >
-                ➕ Assign
-              </button>
-            </div>
+            <button
+              disabled={loading || assigned || !selectedShop}
+              onClick={() => assignUser(u._id)}
+              style={{
+                padding: "8px 10px",
+                cursor: "pointer",
+              }}
+            >
+              ➕ Assign
+            </button>
           </div>
         );
       })}

@@ -7,7 +7,14 @@ router = APIRouter(prefix="/api/customer", tags=["customer"])
 
 
 # =========================
-# 🛒 GET CART (CLEAN OUTPUT)
+# 🔒 ONLINE SELL CHECK
+# =========================
+def can_sell_online(shop):
+    return shop.get("subscription_plan") in ["online", "enterprise"]
+
+
+# =========================
+# 🛒 GET CART
 # =========================
 @router.get("/cart")
 def get_cart(user=Depends(require_roles("customer"))):
@@ -20,19 +27,12 @@ def get_cart(user=Depends(require_roles("customer"))):
 
     return {
         "customer_id": cart["customer_id"],
-        "items": [
-            {
-                "product_id": i["product_id"],
-                "qty": i["qty"],
-                "shop_id": i.get("shop_id")
-            }
-            for i in cart.get("items", [])
-        ]
+        "items": cart.get("items", [])
     }
 
 
 # =========================
-# 🛒 ADD TO CART (SAFE + CONSISTENT)
+# 🛒 ADD TO CART (STRICT FIX)
 # =========================
 @router.post("/cart")
 def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
@@ -42,6 +42,17 @@ def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
 
+    shop = db.shops.find_one({"_id": product.get("shop_id")})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    # 🔥 NEW: ENFORCE ONLINE PLAN
+    if not can_sell_online(shop):
+        raise HTTPException(
+            status_code=403,
+            detail="This shop is not allowed for online purchases"
+        )
+
     if product.get("stock", 0) < item.qty:
         raise HTTPException(status_code=400, detail="Insufficient stock")
 
@@ -50,7 +61,7 @@ def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
     if not cart:
         cart = {"customer_id": user["_id"], "items": []}
 
-    # enforce single-shop rule
+    # enforce single-shop cart rule
     if cart["items"]:
         existing_shop = cart["items"][0].get("shop_id")
         if existing_shop and existing_shop != product["shop_id"]:
@@ -80,10 +91,7 @@ def add_to_cart(item: CartItemInput, user=Depends(require_roles("customer"))):
         upsert=True
     )
 
-    return {
-        "customer_id": user["_id"],
-        "items": cart["items"]
-    }
+    return cart
 
 
 # =========================
@@ -112,13 +120,7 @@ def remove_from_cart(product_id: str, user=Depends(require_roles("customer"))):
         upsert=True
     )
 
-    return {
-        "customer_id": user["_id"],
-        "items": cart["items"]
-    }
-
-
-# DEPRECATED: checkout is POS-owned at /api/orders/checkout (routers/pos.py).
+    return cart
 
 
 # =========================

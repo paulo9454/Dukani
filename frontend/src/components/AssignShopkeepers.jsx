@@ -21,20 +21,14 @@ function AssignShopkeepers() {
   // LOAD SHOPKEEPERS
   // NOTE: If backend doesn't exist yet, replace later
   // =========================
-  useEffect(() => {
-    API.get("/api/auth/me")
-      .then((res) => {
-        const user = res.data;
-
-        // fallback: if backend doesn't expose list yet
-        if (user.role === "shopkeeper") {
-          setShopkeepers([user]);
-        } else {
-          setShopkeepers([]);
-        }
-      })
-      .catch((err) => console.error("Shopkeepers error:", err));
-  }, []);
+  // =========================
+// LOAD SHOPKEEPERS (FIXED)
+// =========================
+useEffect(() => {
+  API.get("/api/owner/shopkeepers")
+    .then((res) => setShopkeepers(res.data || []))
+    .catch((err) => console.error("Shopkeepers error:", err));
+}, []);
 
   // =========================
   // ASSIGN SHOPKEEPER

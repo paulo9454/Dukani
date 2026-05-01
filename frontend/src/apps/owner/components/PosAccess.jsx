@@ -3,17 +3,17 @@ import API from "../../../api/client";
 
 function PosAccess() {
   const [shops, setShops] = useState([]);
-  const [loading, setLoading] = useState(false);
 
   // =========================
-  // LOAD SHOPS
+  // LOAD SHOPS (FIXED ROUTE)
   // =========================
   const loadShops = async () => {
     try {
-      const res = await API.get("/api/dashboard/shops");
+      const res = await API.get("/api/owner/shops");
       setShops(res.data || []);
     } catch (err) {
       console.error("Failed to load shops:", err);
+      setShops([]);
     }
   };
 
@@ -22,26 +22,27 @@ function PosAccess() {
   }, []);
 
   // =========================
-  // PLAN LOGIC
+  // PLAN LOGIC (FIXED)
   // =========================
   const getPosAccess = (plan) => {
-    return plan === "500" || plan === "1000";
+    return plan === "pos" || plan === "enterprise";
   };
 
   const getOnlineAccess = (plan) => {
-    return plan === "1000";
+    return plan === "online" || plan === "enterprise";
   };
 
   const getBadgeStyle = (plan) => {
-    if (plan === "1000") return { background: "green" };
-    if (plan === "500") return { background: "orange" };
-    return { background: "red" };
+    if (plan === "enterprise") return { background: "green" };
+    if (plan === "pos") return { background: "orange" };
+    return { background: "gray" };
   };
 
   const getPlanLabel = (plan) => {
-    if (plan === "1000") return "FULL ACCESS (POS + ONLINE)";
-    if (plan === "500") return "POS ONLY";
-    return "NO ACCESS";
+    if (plan === "enterprise") return "FULL ACCESS (POS + ONLINE)";
+    if (plan === "pos") return "POS ONLY";
+    if (plan === "online") return "ONLINE ONLY";
+    return "UNKNOWN PLAN";
   };
 
   return (

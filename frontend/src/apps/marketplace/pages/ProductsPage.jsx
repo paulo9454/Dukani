@@ -1,27 +1,50 @@
 import { useEffect, useState } from "react";
+import { getProducts } from "../../../api/products";
 import API from "../../../api/client";
 
 export default function ProductsPage({ shop, onBack }) {
   const [products, setProducts] = useState([]);
+  const [categories, setCategories] = useState([]); // ✅ NEW
   const [loading, setLoading] = useState(true);
 
   // =========================
-  // LOAD PRODUCTS
+  // LOAD PRODUCTS + CATEGORIES
   // =========================
   useEffect(() => {
+    if (!shop) return;
+
     const loadProducts = async () => {
       try {
-        const res = await API.get(`/api/public/products?shop_id=${shop._id}`);
-        setProducts(res.data || []);
+        const data = await getProducts({
+          shop_id: shop.id,
+        });
+
+        setProducts(data || []);
       } catch (err) {
         console.error("Failed to load products:", err);
         setProducts([]);
-      } finally {
-        setLoading(false);
       }
     };
 
-    loadProducts();
+    // ✅ NEW: load categories
+    const loadCategories = async () => {
+      try {
+        const res = await API.get(
+          `/api/categories?shop_id=${shop.id}`
+        );
+        setCategories(res.data || []);
+      } catch (err) {
+        console.error("Failed to load categories:", err);
+      }
+    };
+
+    const loadAll = async () => {
+      setLoading(true);
+      await Promise.all([loadProducts(), loadCategories()]);
+      setLoading(false);
+    };
+
+    loadAll();
   }, [shop]);
 
   // =========================
@@ -30,7 +53,7 @@ export default function ProductsPage({ shop, onBack }) {
   const handleAddToCart = async (product) => {
     try {
       await API.post("/api/customer/cart", {
-        product_id: product._id,
+        product_id: product.id,
         qty: 1,
       });
 
@@ -41,11 +64,14 @@ export default function ProductsPage({ shop, onBack }) {
     }
   };
 
+  // =========================
+  // UI
+  // =========================
   return (
-    <div>
+    <div style={{ padding: 16 }}>
       <button onClick={onBack}>⬅ Back</button>
 
-      <h3>🏪 {shop.name} Products</h3>
+      <h3>🏪 {shop?.name || "Shop"} Products</h3>
 
       {loading && <p>Loading products...</p>}
 
@@ -53,32 +79,44 @@ export default function ProductsPage({ shop, onBack }) {
         <p>No products available</p>
       )}
 
-      <div style={{ display: "grid", gap: 10 }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+          gap: 15,
+        }}
+      >
         {products.map((p) => {
           const outOfStock = (p.stock || 0) <= 0;
           const notOnline = !p.is_online;
 
           return (
             <div
-              key={p._id}
+              key={p.id}
               style={{
                 border: "1px solid #ddd",
                 padding: 12,
-                borderRadius: 8,
-                background: "#fafafa",
+                borderRadius: 10,
+                background: "#fff",
+                boxShadow: "0 2px 6px rgba(0,0,0,0.05)",
               }}
             >
               <b>{p.name}</b>
 
-              <div>KES {p.price}</div>
+              <div style={{ marginTop: 5 }}>
+                <strong>KES {p.price}</strong>
+              </div>
 
               <div style={{ fontSize: 12, color: "#666" }}>
                 Stock: {p.stock ?? 0}
               </div>
 
-              {/* =========================
-                  BUTTON LOGIC (FIXED)
-              ========================= */}
+              {/* ✅ NEW: SHOW CATEGORY */}
+              <div style={{ fontSize: 12, color: "#888" }}>
+                Category: {p.category_id || "None"}
+              </div>
+
+              {/* BUTTON LOGIC */}
               {notOnline ? (
                 <small style={{ color: "gray" }}>
                   Not available online
@@ -91,11 +129,13 @@ export default function ProductsPage({ shop, onBack }) {
                 <button
                   onClick={() => handleAddToCart(p)}
                   style={{
-                    marginTop: 8,
-                    padding: "6px 10px",
-                    background: "green",
+                    marginTop: 10,
+                    padding: "8px",
+                    width: "100%",
+                    background: "#00a082",
                     color: "white",
                     border: "none",
+                    borderRadius: 6,
                     cursor: "pointer",
                   }}
                 >

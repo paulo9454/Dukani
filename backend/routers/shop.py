@@ -6,6 +6,33 @@ router = APIRouter(prefix="/api/shop", tags=["shop"])
 
 
 # =========================
+# 🔐 GET SHOP (SAFE)
+# =========================
+def get_shop(db, shop_id: str):
+    return db.shops.find_one({"_id": shop_id})
+
+
+def assert_shop_access(user, shop):
+    if user["role"] == "admin":
+        return
+
+    if shop["owner_id"] == user["_id"]:
+        return
+
+    # shopkeeper access MUST be validated via assignments collection (not user field)
+    if user["role"] == "shopkeeper":
+        db = get_db()
+        assigned = db.assignments.find_one({
+            "shop_id": shop["_id"],
+            "shopkeeper_id": user["_id"]
+        })
+        if assigned:
+            return
+
+    raise HTTPException(status_code=403, detail="Not allowed")
+
+
+# =========================
 # 🏪 GET SHOP SETTINGS
 # =========================
 @router.get("/{shop_id}/online-settings")
@@ -15,9 +42,11 @@ def get_online_settings(
 ):
     db = get_db()
 
-    shop = db.shops.find_one({"_id": shop_id})
+    shop = get_shop(db, shop_id)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
+
+    assert_shop_access(user, shop)
 
     return {
         "shop_id": shop_id,
@@ -27,7 +56,7 @@ def get_online_settings(
 
 
 # =========================
-# 🚀 UPDATE ONLINE SETTINGS (FIXED)
+# 🚀 UPDATE SHOP SETTINGS
 # =========================
 @router.put("/{shop_id}/online-settings")
 def update_online_settings(
@@ -37,33 +66,26 @@ def update_online_settings(
 ):
     db = get_db()
 
-    shop = db.shops.find_one({"_id": shop_id})
+    shop = get_shop(db, shop_id)
     if not shop:
         raise HTTPException(status_code=404, detail="Shop not found")
 
-    # =========================
-    # ROLE CONTROL
-    # =========================
-    if user.get("role") == "shopkeeper":
-        if shop_id not in user.get("assigned_shop_ids", []):
-            raise HTTPException(status_code=403, detail="Not allowed for this shop")
+    assert_shop_access(user, shop)
 
     online_enabled = payload.get("online_enabled", False)
     category = payload.get("category")
 
-    # =========================
-    # VALIDATION (STRICT FIX)
-    # =========================
-    if online_enabled is True:
-        if not category:
-            raise HTTPException(
-                status_code=400,
-                detail="Category is required to activate online shop",
-            )
+    if online_enabled and not category:
+        raise HTTPException(
+            status_code=400,
+            detail="Category is required",
+        )
 
+    if online_enabled:
         product_count = db.products.count_documents({
             "shop_id": shop_id,
             "is_public": True,
+            "owner_id": shop["owner_id"]
         })
 
         if product_count <= 0:
@@ -72,29 +94,52 @@ def update_online_settings(
                 detail="Add at least one public product before going online",
             )
 
-    # =========================
-    # BUILD UPDATE SAFE
-    # =========================
     update_data = {
         "online_enabled": bool(online_enabled),
     }
 
-    # IMPORTANT: always enforce category when activating online
-    if online_enabled is True:
-        update_data["category"] = category
-
-    elif category is not None:
-        # allow category updates even if offline
+    if category is not None:
         update_data["category"] = category
 
     db.shops.update_one(
-        {"_id": shop_id},
+        {"_id": shop_id, "owner_id": shop["owner_id"]},
         {"$set": update_data},
     )
 
     return {
-        "message": "Shop online settings updated",
+        "message": "Shop updated",
         "shop_id": shop_id,
         "online_enabled": update_data["online_enabled"],
-        "category": update_data.get("category", shop.get("category")),
+        "category": update_data.get("category"),
     }
+
+
+# =========================
+# 🏪 GET MY SHOPS (CLEAN TENANT RULE)
+# =========================
+@router.get("/my")
+def get_my_shops(
+    user=Depends(require_roles("shopkeeper", "owner", "admin", "partner")),
+):
+    db = get_db()
+
+    # ADMIN
+    if user["role"] == "admin":
+        shops = list(db.shops.find({}))
+        return [{**s, "_id": str(s["_id"])} for s in shops]
+
+    # OWNER / PARTNER
+    if user["role"] in {"owner", "partner"}:
+        shops = list(db.shops.find({"owner_id": user["_id"]}))
+        return [{**s, "_id": str(s["_id"])} for s in shops]
+
+    # SHOPKEEPER → ONLY via assignments collection (NO user field dependency)
+    assigned = db.assignments.find({"shopkeeper_id": user["_id"]})
+    shop_ids = [a["shop_id"] for a in assigned]
+
+    if not shop_ids:
+        return []
+
+    shops = list(db.shops.find({"_id": {"$in": shop_ids}}))
+
+    return [{**s, "_id": str(s["_id"])} for s in shops]

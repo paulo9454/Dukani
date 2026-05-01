@@ -2,11 +2,15 @@ import axios from "axios";
 
 const API = axios.create({
   baseURL: "http://127.0.0.1:8000",
+  timeout: 15000,
+  headers: {
+    "Content-Type": "application/json",
+  },
 });
 
-// ================================
-// REQUEST INTERCEPTOR
-// ================================
+let isRefreshing = false;
+
+// attach token
 API.interceptors.request.use((config) => {
   const token = localStorage.getItem("token");
 
@@ -17,53 +21,49 @@ API.interceptors.request.use((config) => {
   return config;
 });
 
-// ================================
-// REFRESH FUNCTION
-// ================================
-const refreshToken = async () => {
-  try {
-    const refresh_token = localStorage.getItem("refresh_token");
-
-    if (!refresh_token) return null;
-
-    const res = await axios.post(
-      "http://127.0.0.1:8000/api/auth/refresh",
-      {
-        refresh_token,
-      }
-    );
-
-    localStorage.setItem("token", res.data.access_token);
-    localStorage.setItem("user", JSON.stringify(res.data.user));
-
-    return res.data.access_token;
-  } catch (err) {
-    console.error("Refresh failed");
-    return null;
-  }
-};
-
-// ================================
-// RESPONSE INTERCEPTOR
-// ================================
+// response handler
 API.interceptors.response.use(
-  (response) => response,
-
+  (res) => res,
   async (error) => {
-    const originalRequest = error.config;
+    const original = error.config;
 
-    if (error?.response?.status === 401 && !originalRequest._retry) {
-      originalRequest._retry = true;
+    // ❌ no response = backend down
+    if (!error.response) {
+      console.error("Network error - backend unreachable");
+      return Promise.reject(error);
+    }
 
-      const newToken = await refreshToken();
+    // 🔐 token expired
+    if (error.response.status === 401 && !original._retry) {
+      original._retry = true;
 
-      if (newToken) {
-        originalRequest.headers.Authorization = `Bearer ${newToken}`;
-        return API(originalRequest);
+      if (isRefreshing) return Promise.reject(error);
+      isRefreshing = true;
+
+      const refresh_token = localStorage.getItem("refresh_token");
+
+      if (!refresh_token) {
+        localStorage.clear();
+        window.location.href = "/login";
+        return;
       }
 
-      localStorage.clear();
-      window.location.href = "/login";
+      try {
+        const res = await axios.post(
+          "http://127.0.0.1:8000/api/auth/refresh",
+          { refresh_token }
+        );
+
+        localStorage.setItem("token", res.data.access_token);
+        isRefreshing = false;
+
+        original.headers.Authorization = `Bearer ${res.data.access_token}`;
+        return API(original);
+      } catch (err) {
+        isRefreshing = false;
+        localStorage.clear();
+        window.location.href = "/login";
+      }
     }
 
     return Promise.reject(error);

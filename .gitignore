@@ -6,3 +6,8 @@ node_modules/
 backend/.env
 playwright-report/
 frontend/dist/
+venv/
+__pycache__/
+*.pyc
+.env
+frontend/dist/

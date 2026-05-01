@@ -86,7 +86,8 @@ def login(payload: LoginRequest):
 
     user = db.users.find_one({"email": payload.email.lower()})
 
-    if not user or not verify_password(payload.password, user["password_hash"]):
+    # 🔥 ONLY FIX: safe access to password_hash
+    if not user or not verify_password(payload.password, user.get("password_hash")):
         audit_log(
             "auth_login",
             status="failed",

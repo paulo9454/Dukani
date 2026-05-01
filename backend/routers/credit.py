@@ -14,8 +14,44 @@ def list_credit_customers(user=Depends(require_roles("owner", "admin", "partner"
     if user["role"] == "shopkeeper":
         return list(db.credit_customers.find({"shop_id": {"$in": user.get("assigned_shop_ids", [])}}))
     return list(db.credit_customers.find({}))
+@router.post("")
+def create_credit_customer(payload: dict, user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
+    db = get_db()
 
+    name = payload.get("name")
+    phone = payload.get("phone")
+    credit_limit = float(payload.get("credit_limit", 0))
+    shop_id = payload.get("shop_id")
 
+    # ✅ VALIDATION FIRST
+    if not name or not phone or not shop_id:
+        raise HTTPException(status_code=400, detail="name, phone, shop_id required")
+
+    # 🛑 SECURITY FIX: shopkeeper must only use assigned shops
+    if user["role"] == "shopkeeper":
+        assigned = user.get("assigned_shop_ids", [])
+        if shop_id not in assigned:
+            raise HTTPException(status_code=403, detail="Not allowed for this shop")
+
+    customer = {
+        "_id": str(uuid.uuid4()),
+        "name": name,
+        "phone": phone,
+        "shop_id": shop_id,
+        "credit_limit": credit_limit,
+        "balance": 0,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    db.credit_customers.insert_one(customer)
+
+    audit_log(
+        "credit_customer_created",
+        actor_id=user["_id"],
+        metadata=customer
+    )
+
+    return customer
 @router.post("/{ledger_id}/payment")
 def record_credit_payment(ledger_id: str, payload: dict, user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()

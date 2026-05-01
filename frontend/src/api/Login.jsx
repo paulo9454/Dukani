@@ -15,15 +15,33 @@ function Login() {
         password,
       });
 
-      // 🧠 SAVE TOKEN (THIS IS THE CRITICAL PART)
-      localStorage.setItem("token", res.data.access_token);
+      const token = res.data.access_token;
+      const user = res.data.user;
+
+      // =========================
+      // SAVE AUTH DATA
+      // =========================
+      localStorage.setItem("token", token);
+      localStorage.setItem("user", JSON.stringify(user));
 
       alert("✅ Login successful!");
 
-      console.log("TOKEN SAVED:", res.data.access_token);
+      console.log("USER:", user);
 
-      // optional: redirect later
-      window.location.href = "/";
+      // =========================
+      // ROLE-BASED REDIRECT
+      // =========================
+      if (user.role === "owner") {
+        window.location.href = "/owner";
+      }
+
+      else if (user.role === "shopkeeper") {
+        window.location.href = "/shopkeeper";
+      }
+
+      else {
+        window.location.href = "/marketplace";
+      }
 
     } catch (err) {
       console.error(err);
@@ -37,14 +55,14 @@ function Login() {
   };
 
   return (
-    <div style={{ padding: "20px", fontFamily: "Arial" }}>
+    <div style={{ padding: 20 }}>
       <h1>🔐 Login</h1>
 
       <input
         placeholder="Email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        style={{ display: "block", marginBottom: "10px", padding: "8px" }}
+        style={{ display: "block", marginBottom: 10, padding: 8 }}
       />
 
       <input
@@ -52,18 +70,17 @@ function Login() {
         type="password"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        style={{ display: "block", marginBottom: "10px", padding: "8px" }}
+        style={{ display: "block", marginBottom: 10, padding: 8 }}
       />
 
       <button
         onClick={handleLogin}
         disabled={loading}
         style={{
-          padding: "10px",
+          padding: 10,
           background: "black",
           color: "white",
           border: "none",
-          cursor: "pointer",
         }}
       >
         {loading ? "Logging in..." : "Login"}

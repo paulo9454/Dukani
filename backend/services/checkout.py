@@ -121,26 +121,9 @@ def checkout_customer(
             "subtotal": subtotal,
         })
 
-    # =========================
-    # CREDIT SUPPORT
-    # =========================
-    if payment_method == "credit":
-        payment_status = "pending"
-        status = "credit"
-
-        db.debts.insert_one({
-            "_id": str(uuid.uuid4()),
-            "customer_id": user["_id"],
-            "shop_id": shop_id,
-            "amount": round2(total),
-            "status": "unpaid",
-            "created_at": now(),
-        })
-
-    else:
-        verification = verify_payment(payment_method, total, payment_meta)
-        payment_status = verification["status"]
-        status = "paid" if payment_status == "confirmed" else "created"
+    verification = verify_payment(payment_method, total, payment_meta)
+    payment_status = verification["status"]
+    status = "paid" if payment_status == "confirmed" else "created"
 
     order_id = str(uuid.uuid4())
 
@@ -157,20 +140,16 @@ def checkout_customer(
     }
 
     db.orders.insert_one(order)
-
     remember_idempotency(scope, idempotency_key, order_id)
 
-    # ✅ RECEIPT
     shop = db.shops.find_one({"_id": shop_id})
-    if not shop:
-        raise HTTPException(404, "Shop not found for receipt")
     receipt = build_receipt(order, shop, operator=None)
 
     return {**order, "receipt": receipt}
 
 
 # =========================
-# POS CHECKOUT (FULL SYSTEM)
+# POS CHECKOUT
 # =========================
 def checkout_pos(
     operator: dict,
@@ -196,47 +175,62 @@ def checkout_pos(
         return existing
 
     total_base = 0
+    total_profit = 0
     order_items = []
 
     for i in items:
         product = reserve_stock(db, i["product_id"], shop_id, i["qty"])
 
-        price = product.get("price", 0)
-        subtotal = price * i["qty"]
+        qty = i["qty"]
+        price_mode = i.get("price_mode", "retail")
+
+        buying_price = float(product.get("buying_price", 0))
+
+        if price_mode == "wholesale":
+            selling_price = float(product.get("wholesale_price", product.get("price", 0)))
+        else:
+            selling_price = float(product.get("price", 0))
+
+        subtotal = selling_price * qty
+        cost_total = buying_price * qty
+        profit = subtotal - cost_total
+
         total_base += subtotal
+        total_profit += profit
+
+        updated_product = db.products.find_one({"_id": product["_id"]})
+        stock_left = updated_product.get("stock", 0)
+        threshold = product.get("low_stock_threshold", 5)
+
+        if stock_left <= threshold:
+            db.notifications.insert_one({
+                "_id": str(uuid.uuid4()),
+                "type": "LOW_STOCK",
+                "shop_id": shop_id,
+                "product_id": product["_id"],
+                "message": f"{product.get('name')} low stock ({stock_left} left)",
+                "read": False,
+                "created_at": now(),
+            })
 
         order_items.append({
             "product_id": product["_id"],
             "name": product.get("name"),
-            "qty": i["qty"],
-            "price": price,
+            "qty": qty,
+            "unit_type": product.get("unit_type", "piece"),
+            "buying_price": buying_price,
+            "selling_price": selling_price,
+            "price_mode": price_mode,
             "subtotal": subtotal,
+            "profit": profit,
         })
 
     tax = (tax_percent / 100) * total_base
     total = max(total_base + tax - discount, 0)
 
-    # =========================
-    # CREDIT (KEY FEATURE)
-    # =========================
-    if payment_method == "credit":
-        if order_source != "physical":
-            raise HTTPException(400, "Credit only allowed for physical shop")
-        payment_status = "pending"
-        status = "credit"
-
-        db.debts.insert_one({
-            "_id": str(uuid.uuid4()),
-            "shop_id": shop_id,
-            "amount": round2(total),
-            "status": "unpaid",
-            "created_at": now(),
-        })
-
-    else:
-        verification = verify_payment(payment_method, total, payment_meta)
-        payment_status = verification["status"]
-        status = "paid" if payment_status == "confirmed" else "created"
+    verification = verify_payment(payment_method, total, payment_meta)
+    payment_status = verification["status"]
+    status = "paid" if payment_status == "confirmed" else "created"
 
     order_id = str(uuid.uuid4())
 
@@ -248,27 +242,42 @@ def checkout_pos(
         "tax": round2(tax),
         "discount": round2(discount),
         "total": round2(total),
+        "profit": round2(total_profit),
         "status": status,
         "payment_status": payment_status,
         "payment_method": payment_method,
         "created_by": operator["_id"],
         "created_at": now(),
+        "order_source": order_source,
     }
 
     db.orders.insert_one(order)
-
     remember_idempotency(scope, idempotency_key, order_id)
-
-    # ✅ RECEIPT SYSTEM
-    shop = db.shops.find_one({"_id": shop_id})
-    if not shop:
-        raise HTTPException(404, "Shop not found for receipt")
-    receipt = build_receipt(order, shop, operator)
 
     audit_log(
         "pos_checkout",
         actor_id=operator["_id"],
-        metadata={"order_id": order_id},
+        metadata={
+            "order_id": order_id,
+            "profit": total_profit,
+        },
     )
 
-    return {**order, "receipt": receipt}
+    receipt_number = str(uuid.uuid4())[:8]
+
+    return {
+        "receipt_number": receipt_number,
+        "order_id": order_id,
+        "cashier": {
+            "id": operator["_id"],
+            "name": operator.get("email", "POS User"),
+        },
+        "items": order_items,
+        "subtotal": round2(total_base),
+        "tax": round2(tax),
+        "discount": round2(discount),
+        "total": round2(total),
+        "profit": round2(total_profit),
+        "payment_status": payment_status,
+        "status": status,
+    }
