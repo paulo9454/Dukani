@@ -2,12 +2,12 @@ import { useState } from "react";
 import API from "../api/client";
 
 /**
- * Checkout modal for the public shop page (/shop/:slug).
- * Handles guest checkout (name/phone/email) + payment method choice.
- * Flow: create order → pay (M-Pesa / Paystack / Cash) → show confirmation.
+ * Simplified customer checkout — no account, no email.
+ * Phone → M-Pesa (or Pay on pickup) → Done.
  */
 export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) {
-  const [info, setInfo] = useState({ name: "", phone: "", email: "" });
+  const [phone, setPhone] = useState("");
+  const [name, setName] = useState("");
   const [method, setMethod] = useState("mpesa");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -22,16 +22,9 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
   const formatKES = (n) => "KES " + Number(n || 0).toLocaleString();
 
   const pay = async () => {
-    if (!info.name || (!info.phone && !info.email)) {
-      setError("Please enter your name and either phone or email.");
-      return;
-    }
-    if (method === "mpesa" && !info.phone) {
-      setError("M-Pesa requires a phone number.");
-      return;
-    }
-    if (method === "paystack" && !info.email) {
-      setError("Paystack requires an email.");
+    const clean = (phone || "").replace(/\s|-/g, "");
+    if (!clean) {
+      setError("Please enter your phone number");
       return;
     }
 
@@ -39,38 +32,33 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
       setError("");
       setLoading(true);
 
-      // 1) Create order
       const orderRes = await API.post("/api/orders/create", {
         shop_slug: slug,
-        customer_info: info,
+        customer_info: { name: name || "Customer", phone: clean },
         items: cart.map((c) => ({ product_id: c._id, quantity: c.qty })),
       });
       const orderId = orderRes.data.order_id;
+      const receiptNumber = orderRes.data.receipt_number;
 
-      // 2) Kick off payment
       let payRes = null;
       if (method === "mpesa") {
         payRes = await API.post("/api/payments/mpesa/stk-push", {
           order_id: orderId,
-          phone: info.phone,
+          phone: clean,
         });
-      } else if (method === "paystack") {
-        payRes = await API.post("/api/payments/paystack/initialize", {
-          order_id: orderId,
-          email: info.email,
-        });
-      } // method === "cash": order stays pending, owner fulfils on pickup.
+      }
+      // method === "cash": nothing to call, owner fulfils on pickup.
 
       setResult({
         order_id: orderId,
+        receipt_number: receiptNumber,
         method,
+        phone: clean,
         total: orderRes.data.total,
         payment: payRes?.data,
         message:
           method === "mpesa"
-            ? "Check your phone to complete the M-Pesa payment."
-            : method === "paystack"
-            ? "Payment initialized. Use the reference to complete via Paystack."
+            ? "Check your phone — approve the M-Pesa prompt to complete payment."
             : "Order placed. Pay on pickup.",
       });
 
@@ -88,23 +76,18 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         <div style={modal}>
           <h2 style={{ marginTop: 0 }}>🎉 Order placed</h2>
           <p>
-            <b>Order ID:</b>{" "}
-            <code style={{ fontSize: 12 }}>{result.order_id}</code>
+            <b>Receipt:</b>{" "}
+            <code>{result.receipt_number || result.order_id.slice(0, 8)}</code>
           </p>
           <p>
             <b>Total:</b> {formatKES(result.total)}
           </p>
           <p>
-            <b>Payment:</b> {result.method.toUpperCase()}
+            <b>Phone:</b> {result.phone}
           </p>
           <p style={{ color: "#16a34a" }}>{result.message}</p>
-          {result.payment?.reference && (
-            <p style={{ fontSize: 12, color: "#64748b" }}>
-              Reference: {result.payment.reference}
-            </p>
-          )}
           <a
-            href={`/order/${result.order_id}`}
+            href={`/track/${result.order_id}`}
             data-testid="checkout-track-link"
             style={{
               display: "inline-block",
@@ -132,32 +115,25 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         </p>
 
         <input
-          data-testid="co-name"
-          placeholder="Full name"
-          value={info.name}
-          onChange={(e) => setInfo({ ...info, name: e.target.value })}
-          style={input}
-        />
-        <input
           data-testid="co-phone"
-          placeholder="Phone (e.g. 254712345678)"
-          value={info.phone}
-          onChange={(e) => setInfo({ ...info, phone: e.target.value })}
+          placeholder="Phone number (e.g. 254712345678)"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
           style={input}
+          inputMode="tel"
         />
         <input
-          data-testid="co-email"
-          placeholder="Email"
-          value={info.email}
-          onChange={(e) => setInfo({ ...info, email: e.target.value })}
-          style={input}
+          data-testid="co-name"
+          placeholder="Your name (optional)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={{ ...input, marginTop: 8 }}
         />
 
         <div style={{ marginTop: 12, fontWeight: 600 }}>Payment method</div>
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           {[
             { v: "mpesa", l: "🟢 M-Pesa" },
-            { v: "paystack", l: "💳 Paystack" },
             { v: "cash", l: "💵 Pay on pickup" },
           ].map((o) => (
             <button
@@ -188,7 +164,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
             style={{ ...primaryBtn, opacity: loading ? 0.7 : 1 }}
           >
             {loading
-              ? "⏳ Processing… please wait"
+              ? "⏳ Processing…"
               : method === "cash"
               ? `Place order (${formatKES(total)})`
               : `Pay ${formatKES(total)}`}
@@ -206,11 +182,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
             flexWrap: "wrap",
           }}
         >
-          <span>🔒 Secure checkout</span>
-          <span>·</span>
-          <span>🟢 M-Pesa</span>
-          <span>·</span>
-          <span>💳 Card via Paystack</span>
+          <span>🔒 Secure checkout · M-Pesa</span>
         </div>
       </div>
     </div>

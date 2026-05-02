@@ -39,6 +39,15 @@ def _user_response(user: dict) -> dict:
 def register(payload: RegisterRequest):
     db = get_db()
     email = payload.email.lower()
+
+    # Dukayko is an owner-facing app — customers order via /shop/:slug and never
+    # need an account. Reject customer registrations cleanly.
+    if payload.role == "customer":
+        raise HTTPException(
+            status_code=400,
+            detail="Customer accounts aren't used in Dukayko. Open a shop link to order.",
+        )
+
     if db.users.find_one({"email": email}):
         audit_log("auth_register", status="failed",
                   metadata={"email": email, "reason": "duplicate"})

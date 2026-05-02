@@ -2,7 +2,6 @@ import { useState } from "react";
 import API from "../api/client";
 
 function Login({ onSwitch, onLogin, onNeedsVerification }) {
-  const [tab, setTab] = useState("owner"); // owner | customer
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -19,13 +18,9 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
       const res = await API.post("/api/auth/login", { email, password });
       const { access_token, user } = res.data;
 
-      // gentle role-mismatch warning (still allow login — server is the source of truth)
-      if (tab === "owner" && user.role === "customer") {
-        setError("This email is registered as a customer. Use the Customer tab.");
-        return;
-      }
-      if (tab === "customer" && user.role !== "customer") {
-        setError("This email is not a customer account. Use the Owner tab.");
+      // Customer accounts aren't used from the app anymore — they order via /shop/:slug.
+      if (user.role === "customer") {
+        setError("Customer accounts aren't used here. Go to your shop link to order.");
         return;
       }
 
@@ -36,7 +31,6 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
       onLogin?.({ access_token, user });
     } catch (err) {
       const detail = err?.response?.data?.detail || "Login failed";
-      // route to email verification flow if needed
       if (
         err?.response?.status === 403 &&
         /not verified/i.test(String(detail))
@@ -61,29 +55,13 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
           />
           <div>
             <h2 style={{ margin: 0 }}>Dukayko</h2>
-            <small style={{ color: "#64748b" }}>Sell. Track. Grow.</small>
+            <small style={{ color: "#64748b" }}>
+              Dukayko helps shops sell online instantly.
+            </small>
           </div>
         </div>
 
-        <h3 style={{ marginTop: 24, marginBottom: 8 }}>Sign in</h3>
-
-        {/* ROLE TABS */}
-        <div style={tabsRow}>
-          <button
-            data-testid="login-tab-owner"
-            onClick={() => setTab("owner")}
-            style={tabBtn(tab === "owner")}
-          >
-            🏪 Shop Owner
-          </button>
-          <button
-            data-testid="login-tab-customer"
-            onClick={() => setTab("customer")}
-            style={tabBtn(tab === "customer")}
-          >
-            🛍️ Customer
-          </button>
-        </div>
+        <h3 style={{ marginTop: 24, marginBottom: 8 }}>Shop Owner sign in</h3>
 
         <input
           data-testid="login-email"
@@ -117,11 +95,11 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
           disabled={loading}
           style={{ ...primaryBtn, marginTop: 14 }}
         >
-          {loading ? "Signing in…" : `Sign in as ${tab}`}
+          {loading ? "Signing in…" : "Sign in"}
         </button>
 
         <p style={{ marginTop: 16, fontSize: 13, color: "#64748b" }}>
-          New to Dukayko?{" "}
+          New shop owner?{" "}
           <button onClick={onSwitch} style={linkBtn} data-testid="goto-register">
             Create an account
           </button>

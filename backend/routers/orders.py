@@ -240,22 +240,29 @@ def create_online_order(
     if not _online_ok(shop):
         raise HTTPException(status_code=403, detail="Shop is not selling online")
 
-    # Guest vs logged-in
+    # Guest vs logged-in (customer auth is no longer required)
     customer_info = payload.get("customer_info") or {}
+    # Accept flat spec-style fields too: phone_number, name
+    if payload.get("phone_number") and not customer_info.get("phone"):
+        customer_info["phone"] = payload.get("phone_number")
+    if payload.get("name") and not customer_info.get("name"):
+        customer_info["name"] = payload.get("name")
+
     if user and user.get("role") == "customer":
         customer_id = user["_id"]
         customer_info = {
-            "name": customer_info.get("name") or user.get("full_name"),
-            "email": customer_info.get("email") or user.get("email"),
+            "name": customer_info.get("name") or user.get("full_name") or "Customer",
             "phone": customer_info.get("phone") or user.get("phone"),
+            "email": customer_info.get("email") or user.get("email"),
         }
     else:
         customer_id = None
-        if not (customer_info.get("name") and (customer_info.get("email") or customer_info.get("phone"))):
+        if not customer_info.get("phone"):
             raise HTTPException(
                 status_code=400,
-                detail="Guest checkout requires customer_info.name and either email or phone",
+                detail="Phone number is required to place an order",
             )
+        customer_info.setdefault("name", "Customer")
 
     # 🛡 Duplicate-order guard (10s window)
     customer_key = (

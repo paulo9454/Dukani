@@ -6,16 +6,14 @@ import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
 import OrderTrack from "./pages/OrderTrack";
-import MyOrders from "./pages/MyOrders";
 
 import OwnerShell from "./apps/owner/OwnerShell";
 import ShopkeeperHome from "./apps/Shopkeeper/ShopkeeperHome";
-import CustomerApp from "./apps/customer/CustomerApp";
 import POS from "./apps/pos/PosApp";
 
 function App() {
   const [authView, setAuthView] = useState("login");
-  const [pendingVerification, setPendingVerification] = useState(null); // {email}
+  const [pendingVerification, setPendingVerification] = useState(null);
 
   const [token, setToken] = useState(() => localStorage.getItem("token"));
 
@@ -42,10 +40,10 @@ function App() {
   }
 
   // =========================
-  // PUBLIC ROUTE — /order/:id  (track-by-id-with-contact, no auth)
+  // PUBLIC ROUTE — /order/:id OR /track/:id  (phone-based)
   // =========================
-  if (path.startsWith("/order/")) {
-    const id = path.replace(/^\/order\//, "").replace(/\/+$/, "");
+  if (path.startsWith("/order/") || path.startsWith("/track/")) {
+    const id = path.replace(/^\/(order|track)\//, "").replace(/\/+$/, "");
     return <OrderTrack orderId={id} />;
   }
 
@@ -72,13 +70,19 @@ function App() {
   }, [token]);
 
   // =========================
-  // AUTO REDIRECT AFTER LOGIN
+  // AUTO REDIRECT AFTER LOGIN — synchronous to avoid 404 flash
   // =========================
   useEffect(() => {
     if (!token || !user?.role) return;
     if (path === "/") {
-      if (user.role === "owner") window.location.href = "/owner";
-      else if (user.role === "shopkeeper") window.location.href = "/shopkeeper";
+      if (user.role === "owner") window.location.replace("/owner");
+      else if (user.role === "shopkeeper") window.location.replace("/shopkeeper");
+      else {
+        // Legacy customer accounts — just log them out, app is not for them anymore.
+        localStorage.clear();
+        setToken(null);
+        setUser({});
+      }
     }
   }, [token, user, path]);
 
@@ -94,7 +98,7 @@ function App() {
   }
 
   // =========================
-  // AUTH VIEW
+  // AUTH VIEW (owner-only now)
   // =========================
   if (!token || !user?.role) {
     if (pendingVerification) {
@@ -161,15 +165,6 @@ function App() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        {user.role === "customer" && (
-          <a
-            href="/my-orders"
-            data-testid="my-orders-link"
-            style={{ fontSize: 13, color: "#0f766e", textDecoration: "none" }}
-          >
-            🧾 My Orders
-          </a>
-        )}
         <span style={{ fontSize: 13, color: "#64748b" }}>{user.role}</span>
         <button
           data-testid="logout-btn"
@@ -189,12 +184,13 @@ function App() {
   );
 
   // =========================
-  // ROUTING
+  // ROUTING — Owner / Shopkeeper only
   // =========================
   let content = null;
 
-  if (path.startsWith("/my-orders")) {
-    content = <MyOrders />;
+  if (path === "/" && (user.role === "owner" || user.role === "shopkeeper")) {
+    // Redirect is in-flight from useEffect; avoid showing 404 for a split second.
+    content = <div style={{ padding: 20 }}>Redirecting to your dashboard…</div>;
   } else if (path.startsWith("/pos")) {
     if (!shopIdFromUrl) {
       content = <div style={{ padding: 20 }}>❌ Missing shopId</div>;
@@ -217,8 +213,6 @@ function App() {
     content = <ShopkeeperHome user={user} />;
   } else if (path.startsWith("/owner")) {
     content = <OwnerShell user={user} />;
-  } else if (user.role === "customer") {
-    content = <CustomerApp user={user} />;
   } else {
     content = (
       <div style={{ padding: 20 }}>

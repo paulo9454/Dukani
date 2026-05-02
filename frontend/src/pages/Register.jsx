@@ -2,7 +2,6 @@ import { useState } from "react";
 import API from "../api/client";
 
 function Register({ onSwitch, onNeedsVerification }) {
-  const [tab, setTab] = useState("owner");
   const [form, setForm] = useState({
     full_name: "",
     email: "",
@@ -28,7 +27,7 @@ function Register({ onSwitch, onNeedsVerification }) {
         full_name: full_name.trim(),
         email: email.trim().toLowerCase(),
         password,
-        role: tab,
+        role: "owner",
       });
 
       if (res.data?.requires_verification) {
@@ -36,7 +35,6 @@ function Register({ onSwitch, onNeedsVerification }) {
         return;
       }
 
-      // auto-login fallback (when email verification disabled)
       localStorage.setItem("token", res.data.access_token);
       if (res.data.refresh_token)
         localStorage.setItem("refresh_token", res.data.refresh_token);
@@ -59,36 +57,19 @@ function Register({ onSwitch, onNeedsVerification }) {
             style={{ height: 44, borderRadius: 8 }}
           />
           <div>
-            <h2 style={{ margin: 0 }}>Create your account</h2>
+            <h2 style={{ margin: 0 }}>Open your shop</h2>
             <small style={{ color: "#64748b" }}>
-              Free POS trial · Online store on demand
+              Dukayko helps shops sell online instantly.
             </small>
           </div>
         </div>
 
-        <div style={tabsRow}>
-          <button
-            data-testid="register-tab-owner"
-            onClick={() => setTab("owner")}
-            style={tabBtn(tab === "owner")}
-          >
-            🏪 Shop Owner
-          </button>
-          <button
-            data-testid="register-tab-customer"
-            onClick={() => setTab("customer")}
-            style={tabBtn(tab === "customer")}
-          >
-            🛍️ Customer
-          </button>
-        </div>
-
         <input
           data-testid="register-name"
-          placeholder="Full Name"
+          placeholder="Your name"
           value={form.full_name}
           onChange={(e) => setForm({ ...form, full_name: e.target.value })}
-          style={inputStyle}
+          style={{ ...inputStyle, marginTop: 18 }}
         />
         <input
           data-testid="register-email"
@@ -123,11 +104,7 @@ function Register({ onSwitch, onNeedsVerification }) {
           disabled={loading}
           style={{ ...primaryBtn, marginTop: 14 }}
         >
-          {loading
-            ? "Creating account…"
-            : tab === "owner"
-            ? "Create Owner account"
-            : "Create Customer account"}
+          {loading ? "Creating account…" : "Create Shop Owner account"}
         </button>
 
         <p style={{ marginTop: 16, fontSize: 13, color: "#64748b" }}>
@@ -157,18 +134,6 @@ const cardStyle = {
   padding: 28,
   boxShadow: "0 10px 30px rgba(0,0,0,0.06)",
 };
-const tabsRow = { display: "flex", gap: 8, margin: "16px 0 14px" };
-const tabBtn = (active) => ({
-  flex: 1,
-  padding: "8px 10px",
-  background: active ? "#16a34a" : "#f1f5f9",
-  color: active ? "white" : "#0f172a",
-  border: "none",
-  borderRadius: 8,
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: 13,
-});
 const inputStyle = {
   width: "100%",
   padding: "10px 12px",
