@@ -225,51 +225,96 @@ def unassign_shopkeeper(shop_id: str, shopkeeper_id: str, user=Depends(require_r
 def get_sales(user=Depends(require_roles("owner", "admin", "partner"))):
     db = get_db()
     if user["role"] in {"owner", "partner"}:
-        shops = list(db.shops.find({"owner_id": user["_id"]}, {"_id": 1, "name": 1}))
+        shops = list(db.shops.find({"owner_id": user["_id"]}, {"_id": 1, "name": 1, "subscription_plan": 1}))
     else:
-        shops = list(db.shops.find({}, {"_id": 1, "name": 1}))
+        shops = list(db.shops.find({}, {"_id": 1, "name": 1, "subscription_plan": 1}))
 
-    shop_by_id = {s["_id"]: s.get("name") or s["_id"] for s in shops}
+    shop_by_id = {
+        s["_id"]: {
+            "name": s.get("name") or s["_id"],
+            "plan": s.get("subscription_plan") or "legacy",
+        }
+        for s in shops
+    }
     shop_ids = list(shop_by_id.keys())
 
     orders = list(
         db.orders.find(
             {"shop_id": {"$in": shop_ids}, "payment_status": "confirmed"},
-            {"_id": 1, "shop_id": 1, "total": 1, "created_at": 1},
+            {
+                "_id": 1, "shop_id": 1, "total": 1, "created_at": 1,
+                "created_by": 1, "customer_id": 1, "order_source": 1,
+                "payment_method": 1, "profit": 1,
+            },
         )
         .sort("created_at", -1)
     )
 
-    total_revenue = sum(float(o.get("total", 0)) for o in orders)
-    total_orders = len(orders)
-    avg_order = (total_revenue / total_orders) if total_orders else 0
+    def is_online_order(o: dict) -> bool:
+        # Online orders come from customer checkout; they have customer_id and no created_by operator
+        if o.get("order_source") == "online":
+            return True
+        return bool(o.get("customer_id")) and not o.get("created_by")
 
-    per_shop = {}
+    total_pos = 0.0
+    total_online = 0.0
+    total_orders = 0
+    total_profit = 0.0
+
+    per_shop = {
+        sid: {
+            "shop_id": sid,
+            "shop_name": meta["name"],
+            "plan": meta["plan"],
+            "pos_revenue": 0.0,
+            "online_revenue": 0.0,
+            "orders": 0,
+            "revenue": 0.0,
+        }
+        for sid, meta in shop_by_id.items()
+    }
+
+    recent = []
     for o in orders:
         sid = o["shop_id"]
-        if sid not in per_shop:
-            per_shop[sid] = {
-                "shop_id": sid,
-                "shop_name": shop_by_id.get(sid, sid),
-                "revenue": 0.0,
-                "orders": 0,
-            }
-        per_shop[sid]["revenue"] += float(o.get("total", 0))
-        per_shop[sid]["orders"] += 1
+        amount = float(o.get("total", 0))
+        meta = shop_by_id.get(sid, {"name": sid, "plan": "legacy"})
+        online_flag = is_online_order(o)
 
-    recent = [
-        {
-            "_id": str(o["_id"]),
-            "shop_id": o["shop_id"],
-            "shop_name": shop_by_id.get(o["shop_id"], o["shop_id"]),
-            "total": float(o.get("total", 0)),
-            "created_at": o.get("created_at"),
-        }
-        for o in orders[:20]
-    ]
+        # Rule: online sales only counted for shops on a plan that includes online
+        counts_online = online_flag and meta["plan"] in {"pos_online", "online", "enterprise"}
+
+        if counts_online:
+            total_online += amount
+            per_shop[sid]["online_revenue"] += amount
+        else:
+            total_pos += amount
+            per_shop[sid]["pos_revenue"] += amount
+
+        per_shop[sid]["orders"] += 1
+        per_shop[sid]["revenue"] += amount
+        total_orders += 1
+        total_profit += float(o.get("profit", 0) or 0)
+
+        if len(recent) < 20:
+            recent.append({
+                "_id": str(o["_id"]),
+                "shop_id": sid,
+                "shop_name": meta["name"],
+                "total": amount,
+                "created_at": o.get("created_at"),
+                "source": "online" if counts_online else "pos",
+                "payment_method": o.get("payment_method"),
+            })
+
+    total_revenue = total_pos + total_online
+    avg_order = (total_revenue / total_orders) if total_orders else 0
 
     return {
         "revenue": round(total_revenue, 2),
+        "pos_revenue": round(total_pos, 2),
+        "online_revenue": round(total_online, 2),
+        "profit": round(total_profit, 2),
         "orders": total_orders,
         "avg_order": round(avg_order, 2),
         "shops": list(per_shop.values()),
