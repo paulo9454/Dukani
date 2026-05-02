@@ -195,38 +195,123 @@ function Shops({ search = "" }) {
         ) : filteredShops.length === 0 ? (
           <p>No shops found</p>
         ) : (
-          filteredShops.map((shop) => (
-            <div
-              key={shop._id}
-              style={{
-                border: "1px solid #ddd",
-                padding: 15,
-                marginBottom: 10,
-                borderRadius: 8,
-                display: "flex",
-                justifyContent: "space-between",
-              }}
-            >
-              <div>
-                <h4>🏪 {shop.name}</h4>
-                <p>Plan: {shop.subscription_plan}</p>
-                <small>ID: {shop._id}</small>
-              </div>
+          filteredShops.map((shop) => {
+            const shareUrl = shop.slug
+              ? `${window.location.origin}/shop/${shop.slug}`
+              : null;
+            const onlineActive =
+              shop.subscription_plan === "pos_online" ||
+              shop.is_online_enabled ||
+              shop.online_enabled;
 
-              <button
-                onClick={() => deleteShop(shop._id)}
+            const upgradeOnline = async () => {
+              try {
+                await API.post(`/api/owner/shops/${shop._id}/subscribe`, {
+                  plan: "pos_online",
+                });
+                await loadShops();
+                alert("✅ Online store activated!");
+              } catch (err) {
+                alert(err?.response?.data?.detail || "Failed to subscribe");
+              }
+            };
+
+            const copyLink = () => {
+              if (!shareUrl) return;
+              navigator.clipboard?.writeText(shareUrl);
+              alert("Link copied: " + shareUrl);
+            };
+
+            return (
+              <div
+                key={shop._id}
+                data-testid={`shop-card-${shop._id}`}
                 style={{
-                  background: "red",
-                  color: "white",
-                  border: "none",
-                  padding: 8,
-                  cursor: "pointer",
+                  border: "1px solid #e2e8f0",
+                  padding: 15,
+                  marginBottom: 10,
+                  borderRadius: 8,
+                  background: "white",
                 }}
               >
-                Delete
-              </button>
-            </div>
-          ))
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                  <div>
+                    <h4 style={{ margin: 0 }}>🏪 {shop.name}</h4>
+                    <p style={{ margin: "4px 0", color: "#475569" }}>
+                      Plan: <b>{shop.subscription_plan}</b>{" "}
+                      {onlineActive ? (
+                        <span style={{ color: "#16a34a", fontSize: 12 }}>· 🌐 Online ON</span>
+                      ) : (
+                        <span style={{ color: "#94a3b8", fontSize: 12 }}>· Online OFF</span>
+                      )}
+                    </p>
+                    {shareUrl && (
+                      <div style={{ marginTop: 6, fontSize: 12 }}>
+                        🔗 Public link:{" "}
+                        <a href={shareUrl} target="_blank" rel="noreferrer" style={{ color: "#0f766e" }}>
+                          {shareUrl}
+                        </a>{" "}
+                        <button
+                          data-testid={`copy-link-${shop._id}`}
+                          onClick={copyLink}
+                          style={{ marginLeft: 6, padding: "2px 6px", fontSize: 11, cursor: "pointer" }}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                    )}
+                    <small style={{ color: "#94a3b8" }}>ID: {shop._id}</small>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                    {!onlineActive && (
+                      <button
+                        data-testid={`upgrade-online-${shop._id}`}
+                        onClick={upgradeOnline}
+                        style={{
+                          background: "#16a34a",
+                          color: "white",
+                          border: "none",
+                          padding: "8px 12px",
+                          cursor: "pointer",
+                          borderRadius: 6,
+                        }}
+                      >
+                        🌐 Activate Online Store
+                      </button>
+                    )}
+                    <button
+                      onClick={() => (window.location.href = `/pos?shopId=${shop._id}`)}
+                      style={{
+                        background: "#2563eb",
+                        color: "white",
+                        border: "none",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                      }}
+                    >
+                      🚀 Open POS
+                    </button>
+                    <button
+                      onClick={() => deleteShop(shop._id)}
+                      style={{
+                        background: "transparent",
+                        color: "#dc2626",
+                        border: "1px solid #fecaca",
+                        padding: "6px 12px",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        fontSize: 12,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </div>

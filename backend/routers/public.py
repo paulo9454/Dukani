@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
 from backend.db.mongo import get_db
 from backend.services.geo import haversine_km
+from backend.services.slug import slugify, ensure_unique_slug
 
 router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 
@@ -8,8 +9,36 @@ router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 # =========================
 # PLAN HELPERS
 # =========================
-def can_sell_online(shop):
-    return shop.get("subscription_plan") in ["online", "enterprise"]
+def _online_eligible(shop: dict) -> bool:
+    plan = shop.get("subscription_plan")
+    if plan in {"pos_online", "online", "enterprise"}:
+        return True
+    # legacy flag still respected
+    return bool(shop.get("is_online_enabled") or shop.get("online_enabled"))
+
+
+def _ensure_slug(db, shop: dict) -> str:
+    slug = shop.get("slug")
+    if slug:
+        return slug
+    slug = ensure_unique_slug(db, slugify(shop.get("name") or shop["_id"]))
+    db.shops.update_one({"_id": shop["_id"]}, {"$set": {"slug": slug}})
+    return slug
+
+
+def _public_shop_view(shop: dict, slug: str) -> dict:
+    return {
+        "_id": shop["_id"],
+        "slug": slug,
+        "name": shop.get("name"),
+        "description": shop.get("description"),
+        "logo": shop.get("logo"),
+        "category": shop.get("category"),
+        "address": shop.get("address"),
+        "latitude": shop.get("latitude"),
+        "longitude": shop.get("longitude"),
+        "subscription_plan": shop.get("subscription_plan"),
+    }
 
 
 # =========================
@@ -18,26 +47,12 @@ def can_sell_online(shop):
 @router.get("/home")
 def home():
     db = get_db()
-
-    shops = list(db.shops.find({}))
-    
-    # 🔒 ONLY ONLINE-ALLOWED SHOPS
-    online_shops = [s for s in shops if can_sell_online(s)]
-    shop_ids = [s["_id"] for s in online_shops]
-
+    shops = [s for s in db.shops.find({}) if _online_eligible(s)]
+    shop_ids = [s["_id"] for s in shops]
     featured = list(
-        db.products.find(
-            {
-                "is_public": True,
-                "shop_id": {"$in": shop_ids},
-            }
-        ).limit(8)
+        db.products.find({"is_public": True, "shop_id": {"$in": shop_ids}}).limit(8)
     )
-
-    return {
-        "hero": "Welcome to Dukani",
-        "featured": featured,
-    }
+    return {"hero": "Welcome to Dukayko", "featured": featured}
 
 
 # =========================
@@ -46,20 +61,16 @@ def home():
 @router.get("/categories")
 def categories():
     db = get_db()
-
     return sorted(
         db.products.distinct(
             "category",
-            {
-                "is_public": True,
-                "category": {"$nin": [None, ""]},
-            },
+            {"is_public": True, "category": {"$nin": [None, ""]}},
         )
     )
 
 
 # =========================
-# PRODUCTS (MARKETPLACE ONLY)
+# PRODUCTS (MARKETPLACE — global filter)
 # =========================
 @router.get("/products")
 def public_products(
@@ -68,15 +79,11 @@ def public_products(
     q: str | None = Query(default=None),
 ):
     db = get_db()
-
     filters = {"is_public": True}
-
     if category:
         filters["category"] = category
-
     if shop_id:
         filters["shop_id"] = shop_id
-
     if q:
         filters["$or"] = [
             {"name": {"$regex": q, "$options": "i"}},
@@ -84,22 +91,58 @@ def public_products(
         ]
 
     products = list(db.products.find(filters))
-    if not products:
-        return []
-
-    # 🔒 FILTER BY SHOP SUBSCRIPTION PLAN
-    valid_products = []
-
+    valid = []
     for p in products:
         shop = db.shops.find_one({"_id": p.get("shop_id")})
+        if shop and _online_eligible(shop):
+            valid.append(p)
+    return valid
 
-        if not shop:
+
+# =========================
+# PUBLIC SHOPS LIST (online only)
+# =========================
+@router.get("/shops")
+def list_public_shops():
+    db = get_db()
+    out = []
+    for s in db.shops.find({}):
+        if not _online_eligible(s):
             continue
+        slug = _ensure_slug(db, s)
+        out.append(_public_shop_view(s, slug))
+    return out
 
-        if can_sell_online(shop):
-            valid_products.append(p)
 
-    return valid_products
+# =========================
+# PUBLIC SHOP BY SLUG  (Shopify-style /shop/{slug})
+# =========================
+@router.get("/shop/{slug}")
+def public_shop_by_slug(slug: str):
+    db = get_db()
+    shop = db.shops.find_one({"slug": slug})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    if not _online_eligible(shop):
+        raise HTTPException(status_code=403, detail="This shop is not currently selling online")
+    return _public_shop_view(shop, slug)
+
+
+@router.get("/shop/{slug}/products")
+def public_shop_products(slug: str, q: str | None = Query(default=None)):
+    db = get_db()
+    shop = db.shops.find_one({"slug": slug})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    if not _online_eligible(shop):
+        raise HTTPException(status_code=403, detail="This shop is not currently selling online")
+    filters = {"shop_id": shop["_id"], "is_public": True}
+    if q:
+        filters["$or"] = [
+            {"name": {"$regex": q, "$options": "i"}},
+            {"description": {"$regex": q, "$options": "i"}},
+        ]
+    return list(db.products.find(filters))
 
 
 # =========================
@@ -111,34 +154,25 @@ def nearby_shops(
     lng: float = Query(..., ge=-180, le=180),
 ):
     db = get_db()
-
-    shops = list(db.shops.find({}))
-
     ranked = []
-
-    for shop in shops:
-        # 🔒 ONLY SHOW ONLINE-ALLOWED SHOPS
-        if not can_sell_online(shop):
+    for shop in db.shops.find({}):
+        if not _online_eligible(shop):
             continue
-
         try:
             shop_lat = float(shop["latitude"])
             shop_lng = float(shop["longitude"])
         except (TypeError, ValueError, KeyError):
             continue
-
         distance_km = haversine_km(lat, lng, shop_lat, shop_lng)
-
-        ranked.append(
-            {
-                "_id": shop.get("_id"),
-                "name": shop.get("name"),
-                "category": shop.get("category"),
-                "address": shop.get("address"),
-                "latitude": shop.get("latitude"),
-                "longitude": shop.get("longitude"),
-                "distance_km": round(distance_km, 3),
-            }
-        )
-
+        slug = _ensure_slug(db, shop)
+        ranked.append({
+            "_id": shop.get("_id"),
+            "slug": slug,
+            "name": shop.get("name"),
+            "category": shop.get("category"),
+            "address": shop.get("address"),
+            "latitude": shop.get("latitude"),
+            "longitude": shop.get("longitude"),
+            "distance_km": round(distance_km, 3),
+        })
     return sorted(ranked, key=lambda s: s["distance_km"])

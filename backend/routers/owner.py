@@ -50,22 +50,28 @@ def list_owner_shops(user=Depends(require_roles("owner", "admin", "partner"))):
 
 @router.post("/shops")
 def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("owner", "admin", "partner"))):
+    from backend.services.slug import slugify, ensure_unique_slug
     db = get_db()
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
 
     shop_id = str(uuid.uuid4())
+    slug = ensure_unique_slug(db, slugify(payload.get("slug") or name))
     shop_doc = {
         "_id": shop_id,
         "name": name,
+        "slug": slug,
         "owner_id": user["_id"],
         "subscription_plan": "trial_pos",
         "online_enabled": False,
+        "is_online_enabled": False,
         "category": payload.get("category"),
         "latitude": payload.get("latitude"),
         "longitude": payload.get("longitude"),
         "address": payload.get("address"),
+        "logo": payload.get("logo"),
+        "description": payload.get("description"),
     }
     db.shops.insert_one(shop_doc)
 
@@ -88,7 +94,13 @@ def subscribe_shop(shop_id: str, payload: dict = Body(...), user=Depends(require
             raise HTTPException(status_code=403, detail="Not allowed")
 
     db.subscriptions.update_one({"shop_id": shop_id}, {"$set": {"plan": plan, "is_paid": True, "status": "active"}})
-    return {"message": f"Subscribed to {plan}"}
+    # Activate online store if plan includes it
+    online = plan == "pos_online"
+    db.shops.update_one(
+        {"_id": shop_id},
+        {"$set": {"subscription_plan": plan, "online_enabled": online, "is_online_enabled": online}},
+    )
+    return {"message": f"Subscribed to {plan}", "online_enabled": online}
 
 
 @router.delete("/shops/{shop_id}")
