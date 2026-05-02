@@ -114,9 +114,52 @@ def list_shopkeepers(user=Depends(require_roles("owner", "admin", "partner"))):
         return [_normalize_id(u) for u in users]
 
     owner_shop_ids = [s["_id"] for s in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})]
-    shopkeeper_ids = db.assignments.distinct("shopkeeper_id", {"shop_id": {"$in": owner_shop_ids}})
-    users = list(db.users.find({"_id": {"$in": shopkeeper_ids}, "role": "shopkeeper"}, {"password": 0, "password_hash": 0}))
+    assigned_ids = db.assignments.distinct("shopkeeper_id", {"shop_id": {"$in": owner_shop_ids}})
+    created_ids = [u["_id"] for u in db.users.find({"role": "shopkeeper", "created_by_owner_id": user["_id"]}, {"_id": 1})]
+    ids = list({*assigned_ids, *created_ids})
+    users = list(db.users.find({"_id": {"$in": ids}, "role": "shopkeeper"}, {"password": 0, "password_hash": 0}))
     return [_normalize_id(u) for u in users]
+
+
+@router.post("/shopkeepers")
+def create_shopkeeper(payload: dict = Body(...), user=Depends(require_roles("owner", "admin", "partner"))):
+    """Owner-scoped shopkeeper creation. Tags the new shopkeeper with created_by_owner_id
+    so the owner can see them in the Shopkeepers list and assign them to shops."""
+    from backend.core.security import hash_password
+    db = get_db()
+
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    full_name = (payload.get("full_name") or "").strip()
+
+    if not email or not password or not full_name:
+        raise HTTPException(status_code=400, detail="full_name, email and password are required")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="password must be at least 8 characters")
+    if db.users.find_one({"email": email}):
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    shopkeeper_id = str(uuid.uuid4())
+    doc = {
+        "_id": shopkeeper_id,
+        "email": email,
+        "password_hash": hash_password(password),
+        "full_name": full_name,
+        "role": "shopkeeper",
+        "assigned_shop_ids": [],
+        "created_by_owner_id": user["_id"] if user["role"] in {"owner", "partner"} else None,
+        "created_at": datetime.utcnow().isoformat(),
+    }
+    db.users.insert_one(doc)
+    return {
+        "message": "Shopkeeper created",
+        "shopkeeper": {
+            "_id": shopkeeper_id,
+            "email": email,
+            "full_name": full_name,
+            "role": "shopkeeper",
+        },
+    }
 
 
 @router.post("/shops/{shop_id}/shopkeepers/{shopkeeper_id}")
@@ -147,7 +190,21 @@ def list_assignments(shop_id: str, user=Depends(require_roles("owner", "admin", 
     if not _is_owner_scope(user, shop):
         raise HTTPException(status_code=403, detail="Not allowed")
 
-    assignments = list(db.assignments.find({"shop_id": shop_id}, {"_id": 0, "shopkeeper_id": 1, "shop_id": 1}))
+    raw = list(db.assignments.find({"shop_id": shop_id}, {"_id": 0, "shopkeeper_id": 1, "shop_id": 1}))
+    sk_ids = [a["shopkeeper_id"] for a in raw]
+    users = {u["_id"]: u for u in db.users.find(
+        {"_id": {"$in": sk_ids}, "role": "shopkeeper"},
+        {"password": 0, "password_hash": 0},
+    )}
+    assignments = []
+    for a in raw:
+        u = users.get(a["shopkeeper_id"], {})
+        assignments.append({
+            "shop_id": a["shop_id"],
+            "shopkeeper_id": a["shopkeeper_id"],
+            "shopkeeper_name": u.get("full_name") or u.get("name") or "",
+            "shopkeeper_email": u.get("email") or "",
+        })
     return {"assignments": assignments}
 
 

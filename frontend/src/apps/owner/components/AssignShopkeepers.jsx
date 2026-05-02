@@ -120,11 +120,10 @@ function AssignShopkeepers() {
     try {
       setLoading(true);
 
-      await API.post("/api/auth/register", {
+      await API.post("/api/owner/shopkeepers", {
         full_name,
         email,
         password,
-        role: "shopkeeper",
       });
 
       await loadShopkeepers();
@@ -134,9 +133,10 @@ function AssignShopkeepers() {
         email: "",
         password: "",
       });
+      alert("✅ Shopkeeper created");
     } catch (err) {
       console.error("Create shopkeeper error:", err);
-      alert("Failed to create shopkeeper");
+      alert(err?.response?.data?.detail || "Failed to create shopkeeper");
     } finally {
       setLoading(false);
     }
