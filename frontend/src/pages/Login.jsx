@@ -27,8 +27,6 @@ function Login({ onSwitch, onLogin }) {
       localStorage.setItem("refresh_token", refresh_token);
       localStorage.setItem("user", JSON.stringify(user));
 
-      alert("✅ Login successful!");
-
       // ✅ IMPORTANT: notify App.jsx instead of reload
       if (onLogin) {
         onLogin({ access_token, user });

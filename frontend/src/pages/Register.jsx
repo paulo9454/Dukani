@@ -21,9 +21,11 @@ function Register() {
 
       // ✅ auto login after register
       localStorage.setItem("token", res.data.access_token);
+      if (res.data.refresh_token) {
+        localStorage.setItem("refresh_token", res.data.refresh_token);
+      }
       localStorage.setItem("user", JSON.stringify(res.data.user));
 
-      alert("✅ Registered successfully!");
       window.location.href = "/";
 
     } catch (err) {
