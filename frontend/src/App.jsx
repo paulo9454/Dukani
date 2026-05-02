@@ -25,30 +25,26 @@ function App() {
     }
   });
 
-  const [loadingUser, setLoadingUser] = useState(true);
+  // Only show "Loading..." if we have a token AND no cached user yet.
+  // Otherwise we render immediately and re-validate /auth/me in the background,
+  // which avoids the constant "Loading..." flash on every page load/navigation.
+  const [loadingUser, setLoadingUser] = useState(() => {
+    const hasToken = !!localStorage.getItem("token");
+    let cachedRole = null;
+    try {
+      cachedRole = JSON.parse(localStorage.getItem("user") || "{}")?.role || null;
+    } catch {
+      cachedRole = null;
+    }
+    return hasToken && !cachedRole;
+  });
 
   const path = window.location.pathname;
   const urlParams = new URLSearchParams(window.location.search);
   const shopIdFromUrl = urlParams.get("shopId");
 
   // =========================
-  // PUBLIC ROUTE — /shop/:slug (no auth required)
-  // =========================
-  if (path.startsWith("/shop/")) {
-    const slug = path.replace(/^\/shop\//, "").replace(/\/+$/, "");
-    return <PublicShopPage slug={slug} />;
-  }
-
-  // =========================
-  // PUBLIC ROUTE — /order/:id OR /track/:id  (phone-based)
-  // =========================
-  if (path.startsWith("/order/") || path.startsWith("/track/")) {
-    const id = path.replace(/^\/(order|track)\//, "").replace(/\/+$/, "");
-    return <OrderTrack orderId={id} />;
-  }
-
-  // =========================
-  // LOAD USER (when token present)
+  // LOAD USER (when token present) — runs in background, no UI flash
   // =========================
   useEffect(() => {
     if (!token) {
@@ -85,6 +81,22 @@ function App() {
       }
     }
   }, [token, user, path]);
+
+  // =========================
+  // PUBLIC ROUTE — /shop/:slug (no auth required)
+  // =========================
+  if (path.startsWith("/shop/")) {
+    const slug = path.replace(/^\/shop\//, "").replace(/\/+$/, "");
+    return <PublicShopPage slug={slug} />;
+  }
+
+  // =========================
+  // PUBLIC ROUTE — /order/:id OR /track/:id  (phone-based)
+  // =========================
+  if (path.startsWith("/order/") || path.startsWith("/track/")) {
+    const id = path.replace(/^\/(order|track)\//, "").replace(/\/+$/, "");
+    return <OrderTrack orderId={id} />;
+  }
 
   const handleLogout = () => {
     localStorage.clear();

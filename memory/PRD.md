@@ -58,3 +58,18 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
 - SMS/WhatsApp receipts via Twilio (Kenya-friendly) + M-Pesa STK Push live integration.
 - Daily owner email digest (SendGrid/Resend) once Celery is wired.
 - Offline-first POS (service worker + IndexedDB queue) for shops with shaky internet.
+
+## Session: Feb 2026 — Image visibility & Loading flash fixes
+- Root cause of missing product images: `products.py` upload path resolved to
+  `/app/static/products/` but `StaticFiles` was mounted on `/app/backend/static/`.
+  Fixed `upload_dir` in `routers/products.py` (create + update) to write into
+  `BASE_DIR/static/products`, moved existing files, and removed the stale
+  `/app/static/` directory. Existing DB rows already used `/api/static/...` URLs.
+- Root cause of constant "Loading..." flash: `loadingUser` defaulted to `true`
+  on every render. Fixed in `App.jsx` by initializing it lazily — only `true`
+  when a token exists AND no cached user role is in `localStorage`. Also moved
+  the public-route early returns BELOW the `useEffect` calls to keep hook order
+  stable across navigations.
+- Verified: `https://.../api/static/products/<file>` returns 200 through the
+  Kubernetes ingress. `/shop/gomba1` renders both product images. No flash on
+  login → owner dashboard transition.

@@ -63,8 +63,13 @@ async def create_product(
     if image and getattr(image, "filename", None):
         file_ext = image.filename.split(".")[-1]
         filename = f"{uuid.uuid4()}.{file_ext}"
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "static", "products")
-        upload_dir = os.path.abspath(upload_dir)
+        # Save into backend/static/products so it is served by the
+        # StaticFiles mount registered in server.py (BASE_DIR/static).
+        upload_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "static",
+            "products",
+        )
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, filename)
         with open(file_path, "wb") as f:
@@ -149,8 +154,11 @@ async def update_product(
     if image and getattr(image, "filename", None):
         file_ext = image.filename.split(".")[-1]
         filename = f"{uuid.uuid4()}.{file_ext}"
-        upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "static", "products")
-        upload_dir = os.path.abspath(upload_dir)
+        upload_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "static",
+            "products",
+        )
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, filename)
         with open(file_path, "wb") as f:
