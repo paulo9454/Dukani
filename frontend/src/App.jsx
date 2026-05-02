@@ -5,6 +5,8 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
+import OrderTrack from "./pages/OrderTrack";
+import MyOrders from "./pages/MyOrders";
 
 import OwnerShell from "./apps/owner/OwnerShell";
 import ShopkeeperHome from "./apps/Shopkeeper/ShopkeeperHome";
@@ -37,6 +39,14 @@ function App() {
   if (path.startsWith("/shop/")) {
     const slug = path.replace(/^\/shop\//, "").replace(/\/+$/, "");
     return <PublicShopPage slug={slug} />;
+  }
+
+  // =========================
+  // PUBLIC ROUTE — /order/:id  (track-by-id-with-contact, no auth)
+  // =========================
+  if (path.startsWith("/order/")) {
+    const id = path.replace(/^\/order\//, "").replace(/\/+$/, "");
+    return <OrderTrack orderId={id} />;
   }
 
   // =========================
@@ -151,6 +161,15 @@ function App() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        {user.role === "customer" && (
+          <a
+            href="/my-orders"
+            data-testid="my-orders-link"
+            style={{ fontSize: 13, color: "#0f766e", textDecoration: "none" }}
+          >
+            🧾 My Orders
+          </a>
+        )}
         <span style={{ fontSize: 13, color: "#64748b" }}>{user.role}</span>
         <button
           data-testid="logout-btn"
@@ -174,7 +193,9 @@ function App() {
   // =========================
   let content = null;
 
-  if (path.startsWith("/pos")) {
+  if (path.startsWith("/my-orders")) {
+    content = <MyOrders />;
+  } else if (path.startsWith("/pos")) {
     if (!shopIdFromUrl) {
       content = <div style={{ padding: 20 }}>❌ Missing shopId</div>;
     } else {

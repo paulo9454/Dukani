@@ -77,5 +77,28 @@ def send_verification_email(email: str, code: str) -> dict:
     return _send_raw(email, subject, html, text)
 
 
+def send_order_confirmation(email: str, order: dict) -> dict:
+    subject = f"Dukayko order #{order.get('_id', '')[:8]} received"
+    items_html = "".join(
+        f"<tr><td>{i.get('quantity') or i.get('qty')}× {i.get('name')}</td>"
+        f"<td style='text-align:right'>KES {i.get('subtotal')}</td></tr>"
+        for i in (order.get("items") or [])
+    )
+    html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 520px; margin: 0 auto;">
+      <h2 style="color:#16a34a;">🧾 Order received</h2>
+      <p>Order ID: <code>{order.get('_id')}</code></p>
+      <p>Status: <b>{order.get('status', 'pending')}</b></p>
+      <table width="100%" style="border-collapse:collapse;font-size:14px;">
+        {items_html}
+        <tr><td><b>Total</b></td><td style="text-align:right"><b>KES {order.get('total')}</b></td></tr>
+      </table>
+      <p style="color:#555;font-size:13px;">You can track your order with this ID.</p>
+      <p style="color:#999;font-size:12px;">Dukayko · Sell. Track. Grow.</p>
+    </div>
+    """
+    return _send_raw(email, subject, html)
+
+
 def is_email_enabled() -> bool:
     return _smtp_configured()

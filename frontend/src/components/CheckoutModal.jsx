@@ -103,7 +103,19 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
               Reference: {result.payment.reference}
             </p>
           )}
-          <button onClick={onClose} style={primaryBtn} data-testid="checkout-close">
+          <a
+            href={`/order/${result.order_id}`}
+            data-testid="checkout-track-link"
+            style={{
+              display: "inline-block",
+              marginTop: 8,
+              color: "#0f766e",
+              fontSize: 13,
+            }}
+          >
+            🔎 Track this order →
+          </a>
+          <button onClick={onClose} style={{ ...primaryBtn, marginTop: 12 }} data-testid="checkout-close">
             Close
           </button>
         </div>

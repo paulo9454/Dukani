@@ -23,7 +23,9 @@ export default function PublicShopPage({ slug }) {
           API.get(`/api/public/shop/${slug}/products`),
         ]);
         setShop(s.data);
-        setProducts(p.data || []);
+        // Backward-compat: backend now returns {items, page, total, has_more}
+        const list = Array.isArray(p.data) ? p.data : (p.data?.items || []);
+        setProducts(list);
       } catch (err) {
         setError(err?.response?.data?.detail || "Could not load shop");
       } finally {

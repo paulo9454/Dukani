@@ -3,6 +3,7 @@ import API from "../../../api/client";
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
+  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
@@ -10,8 +11,12 @@ export default function Orders() {
   const load = async () => {
     try {
       setLoading(true);
-      const res = await API.get("/api/orders" + (filter ? `?status=${filter}` : ""));
-      setOrders(Array.isArray(res.data) ? res.data : []);
+      const [oRes, sRes] = await Promise.all([
+        API.get("/api/orders" + (filter ? `?status=${filter}` : "")),
+        API.get("/api/orders/stats"),
+      ]);
+      setOrders(Array.isArray(oRes.data) ? oRes.data : []);
+      setStats(sRes.data || null);
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to load orders");
     } finally {
@@ -78,6 +83,37 @@ export default function Orders() {
   return (
     <div data-testid="owner-orders">
       <h2 style={{ marginTop: 0 }}>🧾 Orders</h2>
+
+      {/* KPIs */}
+      {stats && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+          <div style={kpiCard("#16a34a")}>
+            <small>Today's revenue</small>
+            <h3 style={{ margin: "4px 0 0" }}>{formatKES(stats.today_revenue)}</h3>
+            <small style={{ opacity: 0.8 }}>{stats.today_orders} order{stats.today_orders === 1 ? "" : "s"}</small>
+          </div>
+          <div style={kpiCard("#f59e0b")}>
+            <small>Pending</small>
+            <h3 style={{ margin: "4px 0 0" }}>{stats.pending}</h3>
+          </div>
+          <div style={kpiCard("#2563eb")}>
+            <small>Paid</small>
+            <h3 style={{ margin: "4px 0 0" }}>{stats.paid}</h3>
+          </div>
+          <div style={kpiCard("#0f766e")}>
+            <small>Processing</small>
+            <h3 style={{ margin: "4px 0 0" }}>{stats.processing}</h3>
+          </div>
+          <div style={kpiCard("#065f46")}>
+            <small>Completed</small>
+            <h3 style={{ margin: "4px 0 0" }}>{stats.completed}</h3>
+          </div>
+          <div style={kpiCard("#dc2626")}>
+            <small>Cancelled</small>
+            <h3 style={{ margin: "4px 0 0" }}>{stats.cancelled}</h3>
+          </div>
+        </div>
+      )}
 
       <div style={{ marginBottom: 10 }}>
         <label style={{ fontSize: 13, marginRight: 8 }}>Filter:</label>
@@ -203,4 +239,13 @@ const actionBtn = (bg) => ({
   borderRadius: 6,
   cursor: "pointer",
   fontSize: 12,
+});
+
+const kpiCard = (bg) => ({
+  flex: "1 0 140px",
+  padding: 12,
+  borderRadius: 10,
+  background: bg,
+  color: "white",
+  boxShadow: "0 4px 10px rgba(0,0,0,0.05)",
 });

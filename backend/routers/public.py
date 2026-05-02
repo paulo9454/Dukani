@@ -129,7 +129,13 @@ def public_shop_by_slug(slug: str):
 
 
 @router.get("/shop/{slug}/products")
-def public_shop_products(slug: str, q: str | None = Query(default=None)):
+def public_shop_products(
+    slug: str,
+    q: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=20, ge=1, le=100),
+):
     db = get_db()
     shop = db.shops.find_one({"slug": slug})
     if not shop:
@@ -137,12 +143,23 @@ def public_shop_products(slug: str, q: str | None = Query(default=None)):
     if not _online_eligible(shop):
         raise HTTPException(status_code=403, detail="This shop is not currently selling online")
     filters = {"shop_id": shop["_id"], "is_public": True}
+    if category:
+        filters["category"] = category
     if q:
         filters["$or"] = [
             {"name": {"$regex": q, "$options": "i"}},
             {"description": {"$regex": q, "$options": "i"}},
         ]
-    return list(db.products.find(filters))
+    total = db.products.count_documents(filters)
+    skip = (page - 1) * limit
+    items = list(db.products.find(filters).skip(skip).limit(limit))
+    return {
+        "items": items,
+        "page": page,
+        "limit": limit,
+        "total": total,
+        "has_more": skip + len(items) < total,
+    }
 
 
 # =========================

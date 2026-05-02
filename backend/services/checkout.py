@@ -69,7 +69,7 @@ def reserve_stock(db, product_id: str, shop_id: str, qty: int):
             "shop_id": shop_id,
             "stock": {"$gte": qty},
         },
-        {"$inc": {"stock": -qty}},
+        {"$inc": {"stock": -qty, "reserved": qty}},
     )
 
     if updated.modified_count == 0:

@@ -274,8 +274,10 @@ def create_online_order(
 
     order_id = str(_uuid.uuid4())
     now = _dt.now(_tz.utc).isoformat()
+    receipt_number = order_id[:8].upper()
     order = {
         "_id": order_id,
+        "receipt_number": receipt_number,
         "shop_id": shop["_id"],
         "shop_slug": shop.get("slug"),
         "customer_id": customer_id,
@@ -288,11 +290,38 @@ def create_online_order(
         "payment_method": None,
         "payment_provider": None,
         "order_source": "online",
+        "stock_restored": False,
+        "reservation_committed": False,
         "created_at": now,
     }
     db.orders.insert_one(order)
+
+    # 🔔 OWNER NOTIFICATION (lightweight pull; the Owner Orders dashboard polls)
+    try:
+        db.notifications.insert_one({
+            "_id": str(_uuid.uuid4()),
+            "owner_id": shop.get("owner_id"),
+            "shop_id": shop["_id"],
+            "type": "NEW_ORDER",
+            "message": f"New online order — KES {round(total, 2)}",
+            "order_id": order_id,
+            "read": False,
+            "created_at": now,
+        })
+    except Exception:
+        pass
+
+    # 📧 BEST-EFFORT EMAIL CONFIRMATION
+    try:
+        from backend.services.email_service import send_order_confirmation, is_email_enabled
+        if is_email_enabled() and customer_info.get("email"):
+            send_order_confirmation(customer_info["email"], order)
+    except Exception:
+        pass
+
     return {
         "order_id": order_id,
+        "receipt_number": receipt_number,
         "status": order["status"],
         "total": order["total"],
         "currency": "KES",
@@ -335,6 +364,77 @@ def list_owner_orders(
 # =========================================================
 # 📄 SINGLE ORDER (owner or the customer who placed it)
 # =========================================================
+# =========================================================
+# 📊 OWNER STATS (today's revenue, pending count, paid count)
+# =========================================================
+@router.get("/stats")
+def order_stats(user=Depends(require_roles("owner", "admin", "partner"))):
+    db = _get_db()
+    if user["role"] == "admin":
+        shop_ids = [s["_id"] for s in db.shops.find({}, {"_id": 1})]
+    else:
+        shop_ids = [s["_id"] for s in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})]
+
+    start = _dt.now(_tz.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    base = {"shop_id": {"$in": shop_ids}}
+    today = {**base, "created_at": {"$gte": start}}
+
+    today_orders = list(db.orders.find(today, {"total": 1, "status": 1}))
+    pending = db.orders.count_documents({**base, "status": "pending"})
+    paid = db.orders.count_documents({**base, "status": "paid"})
+    processing = db.orders.count_documents({**base, "status": "processing"})
+    completed = db.orders.count_documents({**base, "status": "completed"})
+    cancelled = db.orders.count_documents({**base, "status": "cancelled"})
+
+    today_revenue = sum(float(o.get("total", 0)) for o in today_orders if o.get("status") in {"paid", "processing", "completed"})
+    return {
+        "today_orders": len(today_orders),
+        "today_revenue": round(today_revenue, 2),
+        "pending": pending,
+        "paid": paid,
+        "processing": processing,
+        "completed": completed,
+        "cancelled": cancelled,
+    }
+
+
+# =========================================================
+# 👤 CUSTOMER — MY ORDERS
+# =========================================================
+@router.get("/me")
+def my_orders(user=Depends(require_roles("customer", "owner", "shopkeeper", "admin", "partner"))):
+    db = _get_db()
+    return list(db.orders.find({"customer_id": user["_id"]}).sort("created_at", -1).limit(100))
+
+
+# =========================================================
+# 🔎 PUBLIC ORDER TRACKING (by id + contact match)
+# =========================================================
+@router.get("/track/{order_id}")
+def track_order(order_id: str, contact: str | None = Query(default=None)):
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    info = order.get("customer_info") or {}
+    if contact and contact.strip().lower() not in {
+        (info.get("email") or "").lower(),
+        (info.get("phone") or "").strip(),
+    }:
+        raise HTTPException(status_code=403, detail="Contact does not match this order")
+    return {
+        "_id": order["_id"],
+        "status": order.get("status"),
+        "payment_status": order.get("payment_status"),
+        "payment_method": order.get("payment_method"),
+        "total": order.get("total"),
+        "items": order.get("items"),
+        "shop_id": order.get("shop_id"),
+        "shop_slug": order.get("shop_slug"),
+        "created_at": order.get("created_at"),
+    }
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str, user=Depends(get_current_user_optional)):
     db = _get_db()
