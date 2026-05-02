@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import API from "../../api/client";
+import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 import "../../receipt.css";
 
 function PosApp({ user, shopId }) {
@@ -93,10 +94,10 @@ const loadCategories = useCallback(async () => {
   const filteredProducts = useMemo(() => {
   let result = products;
 
-  // ✅ FILTER BY CATEGORY
+  // ✅ FILTER BY CATEGORY (slug-based, matches what ProductModal saves)
   if (activeCategory !== "all") {
     result = result.filter(
-      (p) => String(p.category_id) === String(activeCategory)
+      (p) => String(p.category || "") === String(activeCategory)
     );
   }
 
@@ -209,24 +210,6 @@ const loadCategories = useCallback(async () => {
 
   // ✅ UPDATED CHECKOUT
   const checkout = async () => {
-  const createCreditor = async () => {
-  try {
-    const res = await API.post("/api/credit-customers", {
-      shop_id: activeShopId,
-      name: newCreditor.name,
-      phone: newCreditor.phone,
-      credit_limit: Number(newCreditor.credit_limit),
-    });
-
-    setCreditors((prev) => [res.data, ...prev]);
-
-    setNewCreditor({ name: "", phone: "", credit_limit: "" });
-    setCreditFormOpen(false);
-  } catch (err) {
-    console.error(err.response?.data);
-    alert(err.response?.data?.detail || "Failed to create creditor");
-  }
-};
     try {
     if (creditLimitExceeded) {
   alert(
@@ -372,8 +355,9 @@ useEffect(() => {
     outline: "none",
   }}
 />
-{/* 🧩 CATEGORY BAR */}
+{/* 🧩 CATEGORY BAR (Shopify-style horizontal pills) */}
 <div
+  data-testid="pos-category-bar"
   style={{
     display: "flex",
     gap: 10,
@@ -385,6 +369,7 @@ useEffect(() => {
   {/* ALL */}
   <button
     onClick={() => setActiveCategory("all")}
+    data-testid="pos-category-all"
     style={{
       padding: "8px 14px",
       borderRadius: 20,
@@ -392,29 +377,32 @@ useEffect(() => {
       color: activeCategory === "all" ? "#fff" : "#000",
       whiteSpace: "nowrap",
       fontWeight: "bold",
+      border: "none",
+      cursor: "pointer",
     }}
   >
     🏪 All
   </button>
 
-  {/* CATEGORIES */}
-  {categories.map((c) => (
+  {/* CATEGORIES — only those with at least one product */}
+  {DEFAULT_CATEGORIES.filter((c) =>
+    products.some((p) => p.category === c.value)
+  ).map((c) => (
     <button
-      key={c._id}
-      onClick={() => setActiveCategory(c._id)}
+      key={c.value}
+      onClick={() => setActiveCategory(c.value)}
+      data-testid={`pos-category-${c.value}`}
       style={{
         padding: "8px 14px",
         borderRadius: 20,
-        background: activeCategory === c._id ? "#111" : "#f2f2f2",
-        color: activeCategory === c._id ? "#fff" : "#000",
+        background: activeCategory === c.value ? "#111" : "#f2f2f2",
+        color: activeCategory === c.value ? "#fff" : "#000",
         whiteSpace: "nowrap",
-        display: "flex",
-        alignItems: "center",
-        gap: 6,
+        border: "none",
+        cursor: "pointer",
       }}
     >
-      <span>{c.icon || "📦"}</span>
-      <span>{c.name}</span>
+      {c.label}
     </button>
   ))}
 </div>
@@ -472,7 +460,7 @@ useEffect(() => {
 
       {/* CATEGORY */}
       <small style={{ color: "#777" }}>
-        {getCategoryName(p.category_id)}
+        {categoryLabel(p.category) || "Uncategorized"}
       </small>
 
       {/* PRICE */}

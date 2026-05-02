@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../api/client";
 import CheckoutModal from "../components/CheckoutModal";
+import DEFAULT_CATEGORIES, { categoryLabel } from "../constants/categories";
 
 /**
  * Public Shop Page — Shopify-style /shop/:slug
@@ -13,6 +14,12 @@ export default function PublicShopPage({ slug }) {
   const [error, setError] = useState("");
   const [cart, setCart] = useState([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [activeCategory, setActiveCategory] = useState("all");
+
+  const visibleProducts = useMemo(() => {
+    if (activeCategory === "all") return products;
+    return products.filter((p) => (p.category || "") === activeCategory);
+  }, [products, activeCategory]);
 
   useEffect(() => {
     const load = async () => {
@@ -154,8 +161,47 @@ export default function PublicShopPage({ slug }) {
       {/* PRODUCTS GRID */}
       <div style={{ padding: "20px 24px" }}>
         <h2 style={{ marginTop: 0 }}>Products</h2>
-        {products.length === 0 ? (
-          <p style={{ color: "#64748b" }}>This shop has no products yet.</p>
+
+        {/* 🧩 CATEGORY BAR */}
+        {products.length > 0 && (
+          <div
+            data-testid="public-shop-category-bar"
+            style={{
+              display: "flex",
+              gap: 10,
+              overflowX: "auto",
+              paddingBottom: 8,
+              marginBottom: 16,
+            }}
+          >
+            <button
+              onClick={() => setActiveCategory("all")}
+              data-testid="public-category-all"
+              style={pillStyle(activeCategory === "all")}
+            >
+              🏪 All
+            </button>
+            {DEFAULT_CATEGORIES.filter((c) =>
+              products.some((p) => p.category === c.value)
+            ).map((c) => (
+              <button
+                key={c.value}
+                onClick={() => setActiveCategory(c.value)}
+                data-testid={`public-category-${c.value}`}
+                style={pillStyle(activeCategory === c.value)}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {visibleProducts.length === 0 ? (
+          <p style={{ color: "#64748b" }}>
+            {products.length === 0
+              ? "This shop has no products yet."
+              : "No products in this category yet."}
+          </p>
         ) : (
           <div
             style={{
@@ -165,7 +211,7 @@ export default function PublicShopPage({ slug }) {
             }}
             data-testid="public-shop-products"
           >
-            {products.map((p) => (
+            {visibleProducts.map((p) => (
               <div
                 key={p._id}
                 data-testid={`public-product-${p._id}`}
@@ -205,7 +251,12 @@ export default function PublicShopPage({ slug }) {
                   </div>
                 )}
                 <h3 style={{ margin: "10px 0 4px", fontSize: 15 }}>{p.name}</h3>
-                <div style={{ color: "#16a34a", fontWeight: 700 }}>
+                {p.category && (
+                  <small style={{ color: "#64748b" }}>
+                    {categoryLabel(p.category)}
+                  </small>
+                )}
+                <div style={{ color: "#16a34a", fontWeight: 700, marginTop: 4 }}>
                   {formatKES(p.price)}
                 </div>
                 <button
@@ -352,3 +403,15 @@ const cartStyle = {
   boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
   fontSize: 13,
 };
+
+const pillStyle = (active) => ({
+  padding: "8px 14px",
+  borderRadius: 999,
+  border: "none",
+  background: active ? "#0f172a" : "#e2e8f0",
+  color: active ? "white" : "#0f172a",
+  whiteSpace: "nowrap",
+  fontWeight: active ? 700 : 500,
+  cursor: "pointer",
+  fontSize: 13,
+});
