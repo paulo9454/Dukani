@@ -4,9 +4,6 @@ import API from "../../../api/client";
 function PosAccess() {
   const [shops, setShops] = useState([]);
 
-  // =========================
-  // LOAD SHOPS (FIXED ROUTE)
-  // =========================
   const loadShops = async () => {
     try {
       const res = await API.get("/api/owner/shops");
@@ -22,27 +19,34 @@ function PosAccess() {
   }, []);
 
   // =========================
-  // PLAN LOGIC (FIXED)
+  // PLAN LOGIC aligned with backend taxonomy:
+  //   trial_pos | pos | pos_online | online | legacy
   // =========================
-  const getPosAccess = (plan) => {
-    return plan === "pos" || plan === "enterprise";
-  };
+  const getPosAccess = (plan) =>
+    plan === "trial_pos" || plan === "pos" || plan === "pos_online";
 
-  const getOnlineAccess = (plan) => {
-    return plan === "online" || plan === "enterprise";
-  };
+  const getOnlineAccess = (plan) =>
+    plan === "pos_online" || plan === "online";
 
   const getBadgeStyle = (plan) => {
-    if (plan === "enterprise") return { background: "green" };
-    if (plan === "pos") return { background: "orange" };
+    if (plan === "pos_online") return { background: "green" };
+    if (plan === "trial_pos") return { background: "#f59e0b" };
+    if (plan === "pos") return { background: "#2563eb" };
+    if (plan === "online") return { background: "#7c3aed" };
     return { background: "gray" };
   };
 
   const getPlanLabel = (plan) => {
-    if (plan === "enterprise") return "FULL ACCESS (POS + ONLINE)";
+    if (plan === "trial_pos") return "FREE POS TRIAL (14 DAYS)";
     if (plan === "pos") return "POS ONLY";
+    if (plan === "pos_online") return "FULL ACCESS (POS + ONLINE)";
     if (plan === "online") return "ONLINE ONLY";
+    if (plan === "legacy") return "LEGACY PLAN";
     return "UNKNOWN PLAN";
+  };
+
+  const launchPos = (shopId) => {
+    window.location.href = `/pos?shopId=${shopId}`;
   };
 
   return (
@@ -52,11 +56,8 @@ function PosAccess() {
         SaaS control based on shop subscription plans
       </p>
 
-      {/* =========================
-          SHOPS LIST
-      ========================= */}
       {shops.length === 0 ? (
-        <p>No shops found</p>
+        <p data-testid="no-shops-msg">No shops found. Create a shop first.</p>
       ) : (
         shops.map((shop) => {
           const pos = getPosAccess(shop.subscription_plan);
@@ -65,6 +66,7 @@ function PosAccess() {
           return (
             <div
               key={shop._id}
+              data-testid={`pos-access-card-${shop._id}`}
               style={{
                 border: "1px solid #ddd",
                 padding: 15,
@@ -73,7 +75,6 @@ function PosAccess() {
                 background: "#fff",
               }}
             >
-              {/* SHOP HEADER */}
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <div>
                   <h3>🏪 {shop.name}</h3>
@@ -94,13 +95,11 @@ function PosAccess() {
                 </span>
               </div>
 
-              {/* PLAN STATUS */}
               <div style={{ marginTop: 10 }}>
                 <p>
                   <b>Status:</b> {getPlanLabel(shop.subscription_plan)}
                 </p>
 
-                {/* ACCESS GRID */}
                 <div
                   style={{
                     display: "flex",
@@ -132,6 +131,25 @@ function PosAccess() {
                     <p>{online ? "✅ Enabled" : "❌ Disabled"}</p>
                   </div>
                 </div>
+
+                {pos && (
+                  <button
+                    data-testid={`launch-pos-btn-${shop._id}`}
+                    onClick={() => launchPos(shop._id)}
+                    style={{
+                      marginTop: 14,
+                      padding: "10px 16px",
+                      background: "#16a34a",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      fontWeight: 600,
+                    }}
+                  >
+                    🚀 Launch POS
+                  </button>
+                )}
               </div>
             </div>
           );
