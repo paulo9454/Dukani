@@ -194,6 +194,12 @@ from fastapi import Body, Request
 from backend.db.mongo import get_db as _get_db
 from backend.core.deps import get_current_user_optional
 from backend.services.checkout import reserve_stock as _reserve_stock
+from backend.services.analytics import (
+    track_event as _track,
+    is_duplicate_order as _dup_check,
+    next_receipt_number as _next_receipt,
+    log_error as _log_error,
+)
 from datetime import datetime as _dt, timezone as _tz
 import uuid as _uuid
 
@@ -251,6 +257,19 @@ def create_online_order(
                 detail="Guest checkout requires customer_info.name and either email or phone",
             )
 
+    # 🛡 Duplicate-order guard (10s window)
+    customer_key = (
+        customer_info.get("phone") or customer_info.get("email") or customer_id or ""
+    )
+    is_dup, fingerprint = _dup_check(
+        shop_id=shop["_id"], items=items_in, customer_key=str(customer_key)
+    )
+    if is_dup:
+        raise HTTPException(
+            status_code=429,
+            detail="Duplicate order detected — please wait a few seconds.",
+        )
+
     # Validate stock + compute total
     total = 0.0
     order_items = []
@@ -274,10 +293,11 @@ def create_online_order(
 
     order_id = str(_uuid.uuid4())
     now = _dt.now(_tz.utc).isoformat()
-    receipt_number = order_id[:8].upper()
+    receipt_number = _next_receipt()
     order = {
         "_id": order_id,
         "receipt_number": receipt_number,
+        "fingerprint": fingerprint,
         "shop_id": shop["_id"],
         "shop_slug": shop.get("slug"),
         "customer_id": customer_id,
@@ -316,8 +336,17 @@ def create_online_order(
         from backend.services.email_service import send_order_confirmation, is_email_enabled
         if is_email_enabled() and customer_info.get("email"):
             send_order_confirmation(customer_info["email"], order)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_error("orders.email_confirmation", str(exc), metadata={"order_id": order_id})
+
+    # 📊 ANALYTICS
+    _track(
+        "order_created",
+        shop_id=shop["_id"],
+        user_id=customer_id,
+        order_id=order_id,
+        metadata={"total": order["total"], "items": len(order_items)},
+    )
 
     return {
         "order_id": order_id,

@@ -34,7 +34,8 @@ from backend.routers import (
     pos,
     public,
     products,
-    orders
+    orders,
+    analytics,
 )
 
 # =========================
@@ -91,6 +92,7 @@ app.include_router(customer.router)
 app.include_router(categories.router)
 app.include_router(products.router)
 app.include_router(orders.router)
+app.include_router(analytics.router)
 # =========================
 # ✅ INVENTORY ROUTER ADDED
 # =========================
@@ -135,6 +137,56 @@ def docs_favicon():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/health")
+def api_health():
+    """Deep health: DB ping + integration env presence."""
+    db_ok = False
+    try:
+        db = get_db()
+        db.command("ping") if hasattr(db, "command") else db.shops.count_documents({})
+        db_ok = True
+    except Exception:
+        db_ok = False
+
+    integrations = {
+        "paystack": bool(os.environ.get("PAYSTACK_SECRET_KEY")),
+        "mpesa": all(os.environ.get(k) for k in [
+            "MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET",
+            "MPESA_SHORTCODE", "MPESA_PASSKEY",
+        ]),
+        "smtp": bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_FROM")),
+    }
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "database": "connected" if db_ok else "unreachable",
+        "integrations": integrations,
+        "version": "1.3.0",
+    }
+
+
+# =========================
+# STARTUP ENV VALIDATION (warn, never fail)
+# =========================
+@app.on_event("startup")
+def _validate_env():
+    import logging
+    logger = logging.getLogger("dukayko")
+    required = ["MONGO_URL", "DB_NAME", "JWT_SECRET"]
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        logger.warning("Missing required env vars: %s", missing)
+    optional = {
+        "Paystack live": ["PAYSTACK_SECRET_KEY", "PAYSTACK_PUBLIC_KEY"],
+        "M-Pesa live": ["MPESA_CONSUMER_KEY", "MPESA_CONSUMER_SECRET", "MPESA_SHORTCODE", "MPESA_PASSKEY", "MPESA_CALLBACK_URL"],
+        "SMTP": ["SMTP_HOST", "SMTP_FROM"],
+    }
+    for label, keys in optional.items():
+        missing_opt = [k for k in keys if not os.environ.get(k)]
+        if missing_opt:
+            logger.info("Optional integration %s disabled (missing %s)", label, missing_opt)
+
 
 # =========================
 # DEV SEED

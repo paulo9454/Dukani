@@ -178,21 +178,39 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         )}
 
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <button onClick={onClose} style={secondaryBtn}>
+          <button onClick={onClose} style={secondaryBtn} disabled={loading}>
             Cancel
           </button>
           <button
             data-testid="co-pay"
             onClick={pay}
             disabled={loading}
-            style={primaryBtn}
+            style={{ ...primaryBtn, opacity: loading ? 0.7 : 1 }}
           >
             {loading
-              ? "Processing…"
+              ? "⏳ Processing… please wait"
               : method === "cash"
               ? `Place order (${formatKES(total)})`
               : `Pay ${formatKES(total)}`}
           </button>
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            display: "flex",
+            gap: 10,
+            justifyContent: "center",
+            color: "#64748b",
+            fontSize: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span>🔒 Secure checkout</span>
+          <span>·</span>
+          <span>🟢 M-Pesa</span>
+          <span>·</span>
+          <span>💳 Card via Paystack</span>
         </div>
       </div>
     </div>

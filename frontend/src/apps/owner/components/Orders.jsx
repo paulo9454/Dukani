@@ -26,6 +26,8 @@ export default function Orders() {
 
   useEffect(() => {
     load();
+    const t = setInterval(load, 15000); // auto-refresh every 15s for "real-time" feel
+    return () => clearInterval(t);
   }, [filter]);
 
   const setStatus = async (orderId, status) => {

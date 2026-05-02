@@ -32,6 +32,11 @@ from fastapi import APIRouter, Depends, HTTPException, Body, Request, Header
 from backend.core.deps import require_roles, get_current_user_optional
 from backend.db.mongo import get_db
 from backend.services.inventory import restore_order_stock, commit_order_reservation
+from backend.services.analytics import (
+    already_paid as _already_paid,
+    track_event as _track,
+    log_error as _log_error,
+)
 
 
 logger = logging.getLogger("payments")
@@ -130,6 +135,8 @@ def paystack_initialize(
 
     if not email:
         raise HTTPException(status_code=400, detail="email is required")
+    if _already_paid(order_id):
+        raise HTTPException(status_code=409, detail="This order is already paid.")
     order = _get_order_or_none(order_id)
     if order:
         amount = float(order.get("total") or order.get("total_amount") or 0)
@@ -341,6 +348,8 @@ def mpesa_stk_push(
 
     if not phone:
         raise HTTPException(status_code=400, detail="phone is required")
+    if _already_paid(order_id):
+        raise HTTPException(status_code=409, detail="This order is already paid.")
 
     order = _get_order_or_none(order_id)
     if order:

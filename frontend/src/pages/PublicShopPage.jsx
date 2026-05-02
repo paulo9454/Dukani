@@ -26,6 +26,30 @@ export default function PublicShopPage({ slug }) {
         // Backward-compat: backend now returns {items, page, total, has_more}
         const list = Array.isArray(p.data) ? p.data : (p.data?.items || []);
         setProducts(list);
+
+        // 🌍 SEO: dynamic title + description
+        if (s.data?.name) {
+          document.title = `${s.data.name} · Dukayko`;
+          let desc = document.querySelector("meta[name=description]");
+          if (!desc) {
+            desc = document.createElement("meta");
+            desc.setAttribute("name", "description");
+            document.head.appendChild(desc);
+          }
+          desc.setAttribute(
+            "content",
+            s.data.description ||
+              `Buy from ${s.data.name} online — fast checkout via M-Pesa or Card.`
+          );
+        }
+
+        // 📊 Analytics — view_shop
+        try {
+          await API.post("/api/analytics/track", {
+            event_type: "view_shop",
+            shop_id: s.data?._id,
+          });
+        } catch {}
       } catch (err) {
         setError(err?.response?.data?.detail || "Could not load shop");
       } finally {
@@ -47,6 +71,12 @@ export default function PublicShopPage({ slug }) {
       }
       return [...prev, { ...p, qty: 1 }];
     });
+    // 📊 Analytics
+    API.post("/api/analytics/track", {
+      event_type: "add_to_cart",
+      shop_id: shop?._id,
+      metadata: { product_id: p._id, name: p.name },
+    }).catch(() => {});
   };
 
   const removeFromCart = (id) =>
@@ -240,7 +270,14 @@ export default function PublicShopPage({ slug }) {
           </div>
           <button
             data-testid="public-shop-checkout"
-            onClick={() => setCheckoutOpen(true)}
+            onClick={() => {
+              setCheckoutOpen(true);
+              API.post("/api/analytics/track", {
+                event_type: "checkout_start",
+                shop_id: shop?._id,
+                metadata: { items: cart.length, total: cartTotal },
+              }).catch(() => {});
+            }}
             style={{
               marginTop: 8,
               padding: "10px",
