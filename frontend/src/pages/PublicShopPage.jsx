@@ -173,7 +173,7 @@ export default function PublicShopPage({ slug }) {
               >
                 {p.image ? (
                   <img
-                    src={p.image}
+                    src={p.image?.startsWith("/static/") ? "/api" + p.image : p.image}
                     alt={p.name}
                     style={{
                       width: "100%",

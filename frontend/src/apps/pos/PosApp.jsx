@@ -130,7 +130,13 @@ const loadCategories = useCallback(async () => {
   // ✅ attach backend URL
   if (img.startsWith("http")) return img;
 
-  return `${import.meta.env.VITE_BACKEND_URL || ""}${img}`;
+  // Migrate legacy /static/products paths → /api/static/products so they pass
+  // through the Emergent ingress (which only routes /api/* to backend).
+  const normalized = img.startsWith("/static/")
+    ? "/api" + img
+    : img;
+
+  return `${import.meta.env.VITE_BACKEND_URL || ""}${normalized}`;
 };
   const add = (product) => {
     const price = getPrice(product);

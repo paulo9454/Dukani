@@ -69,7 +69,7 @@ async def create_product(
         file_path = os.path.join(upload_dir, filename)
         with open(file_path, "wb") as f:
             f.write(await image.read())
-        image_url = f"/static/products/{filename}"
+        image_url = f"/api/static/products/{filename}"
 
     product = {
         "_id": str(uuid.uuid4()),
@@ -155,7 +155,7 @@ async def update_product(
         file_path = os.path.join(upload_dir, filename)
         with open(file_path, "wb") as f:
             f.write(await image.read())
-        updates["image"] = f"/static/products/{filename}"
+        updates["image"] = f"/api/static/products/{filename}"
 
     if updates:
         updates["updated_at"] = datetime.utcnow().isoformat()

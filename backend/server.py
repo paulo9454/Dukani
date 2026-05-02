@@ -56,6 +56,9 @@ app = FastAPI(
 )
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+# Also expose under /api/static so product images go through the Emergent
+# ingress (which only routes /api/* to backend) — works on preview AND deploy.
+app.mount("/api/static", StaticFiles(directory=STATIC_DIR), name="api_static")
 
 # =========================
 # MIDDLEWARE
