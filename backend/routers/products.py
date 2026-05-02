@@ -16,6 +16,7 @@ router = APIRouter(prefix="/api/products", tags=["products"])
 def list_products(
     shop_id: str | None = Query(default=None),
     q: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     category_id: str | None = Query(default=None),
     barcode: str | None = Query(default=None),
     user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
@@ -26,6 +27,8 @@ def list_products(
         filters["shop_id"] = shop_id
     if category_id:
         filters["category_id"] = category_id
+    if category:
+        filters["category"] = category
     if barcode:
         filters["barcode"] = barcode
     if q:
@@ -44,6 +47,7 @@ async def create_product(
     wholesale_price: float = Form(0),
     buying_price: float = Form(0),
     stock: float = Form(0),
+    category: str = Form(None),
     category_id: str = Form(None),
     barcode: str = Form(None),
     description: str = Form(""),
@@ -76,6 +80,7 @@ async def create_product(
         "buying_price": float(buying_price or 0),
         "stock": float(stock or 0),
         "category_id": category_id,
+        "category": category,
         "barcode": barcode,
         "description": description,
         "low_stock_threshold": int(low_stock_threshold or 5),
@@ -102,6 +107,7 @@ async def update_product(
     wholesale_price: float = Form(None),
     buying_price: float = Form(None),
     stock: float = Form(None),
+    category: str = Form(None),
     category_id: str = Form(None),
     barcode: str = Form(None),
     description: str = Form(None),
@@ -123,6 +129,7 @@ async def update_product(
         ("barcode", barcode),
         ("description", description),
         ("category_id", category_id),
+        ("category", category),
         ("unit_type", unit_type),
     ]:
         if val is not None:

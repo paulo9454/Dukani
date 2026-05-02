@@ -4,10 +4,12 @@ import { getProducts } from "../../api/products";
 import ProductModal from "../../components/ProductModal";
 import RestockModal from "../../components/RestockModal";
 import API from "../../api/client";
+import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 
 function ProductsPage({ shopId }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState("");
 
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
@@ -92,6 +94,24 @@ function ProductsPage({ shopId }) {
       </div>
 
       {/* =========================
+          FILTER BY CATEGORY
+      ========================= */}
+      <div style={{ margin: "12px 0" }}>
+        <label style={{ fontSize: 13, marginRight: 8 }}>Filter by category:</label>
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          data-testid="products-category-filter"
+          style={{ padding: 6 }}
+        >
+          <option value="">All categories</option>
+          {DEFAULT_CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* =========================
           LIST
       ========================= */}
       {loading && <p>Loading...</p>}
@@ -100,7 +120,9 @@ function ProductsPage({ shopId }) {
         <p>No products yet</p>
       )}
 
-      {products.map((p) => (
+      {products
+        .filter((p) => !categoryFilter || p.category === categoryFilter)
+        .map((p) => (
         <div
           key={p._id}
           style={{
@@ -114,7 +136,7 @@ function ProductsPage({ shopId }) {
           <b>{p.name}</b>
 
           <div style={{ fontSize: 13 }}>
-            📂 {getCategoryName(p.category_id)} | 📦 {p.stock} | 🧾 {p.unit_type}
+            📂 {categoryLabel(p.category) || getCategoryName(p.category_id) || "Uncategorized"} | 📦 {p.stock} | 🧾 {p.unit_type}
           </div>
 
           <div style={{ marginTop: 4 }}>

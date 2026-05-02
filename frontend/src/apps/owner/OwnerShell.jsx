@@ -6,6 +6,7 @@ import Shopkeepers from "./components/Shopkeepers";
 import AssignShopkeepers from "./components/AssignShopkeepers";
 import Sales from "./components/Sales";
 import PosAccess from "./components/PosAccess";
+import Orders from "./components/Orders";
 
 import ProductsPage from "../inventory/ProductsPage";
 import API from "../../api/client";
@@ -88,6 +89,8 @@ function OwnerShell() {
         return <AssignShopkeepers />;
       case "sales":
         return <Sales />;
+      case "orders":
+        return <Orders />;
       case "pos-access":
         return <PosAccess />;
       case "inventory":
@@ -176,6 +179,7 @@ function OwnerShell() {
         <Tab id="shopkeepers" label="👥 Shopkeepers" testid="tab-shopkeepers" />
         <Tab id="assignments" label="🔗 Assignments" testid="tab-assignments" />
         <Tab id="inventory" label="📦 Inventory" testid="tab-inventory" />
+        <Tab id="orders" label="🧾 Orders" testid="tab-orders" />
         <Tab id="sales" label="💰 Sales" testid="tab-sales" />
         <Tab id="pos-access" label="🔐 POS Access" testid="tab-pos-access" />
         <Tab id="alerts" label="🔴 Alerts" testid="tab-alerts" />

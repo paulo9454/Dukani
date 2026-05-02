@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import API from "../api/client";
+import DEFAULT_CATEGORIES from "../constants/categories";
 
 function ProductModal({ open, onClose, shopId, onSuccess, product }) {
   const isEdit = !!product;
 
   const [form, setForm] = useState({
     name: "",
+    category: "",
     category_id: "",
 
     // 💰 SELLING
@@ -38,6 +40,7 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
     if (product) {
       setForm({
         name: product.name || "",
+        category: product.category || "",
         category_id: product.category_id || "",
 
         selling_price: Number(product.price || 0),
@@ -56,6 +59,7 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
     } else {
       setForm({
         name: "",
+        category: "",
         category_id: "",
 
         selling_price: 0,
@@ -146,6 +150,7 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
 formData.append("shop_id", shopId);
 formData.append("name", form.name);
 formData.append("category_id", form.category_id);
+formData.append("category", form.category || "");
 
 formData.append("price", Number(form.selling_price || 0));
 formData.append("wholesale_price", Number(form.wholesale_price || 0));
@@ -195,14 +200,15 @@ if (image) {
   />
 
   <select
-  value={form.category_id}
-  onChange={(e) => update("category_id", e.target.value)}
+  value={form.category}
+  onChange={(e) => update("category", e.target.value)}
+  data-testid="product-category-select"
+  style={{ width: "100%", padding: 8 }}
 >
   <option value="">Select Category</option>
-
-  {categories.map((c) => (
-    <option key={c._id} value={c._id}>
-      {(c.icon || "📦") + " " + c.name}
+  {DEFAULT_CATEGORIES.map((c) => (
+    <option key={c.value} value={c.value}>
+      {c.label}
     </option>
   ))}
 </select>

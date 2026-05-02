@@ -183,3 +183,233 @@ def low_stock_alerts(
     alerts = list(db.notifications.find(filters).sort("created_at", -1))
 
     return alerts
+
+
+# =========================================================
+# 🛒 PUBLIC ORDER CREATION (guest or logged-in customer)
+#    Flow: cart → order → payment
+#    After this, client calls /api/payments/{provider}/... with the order_id
+# =========================================================
+from fastapi import Body, Request
+from backend.db.mongo import get_db as _get_db
+from backend.core.deps import get_current_user_optional
+from backend.services.checkout import reserve_stock as _reserve_stock
+from datetime import datetime as _dt, timezone as _tz
+import uuid as _uuid
+
+
+def _online_ok(shop: dict) -> bool:
+    if not shop:
+        return False
+    plan = shop.get("subscription_plan")
+    if plan in {"pos_online", "online", "enterprise"}:
+        return True
+    return bool(shop.get("is_online_enabled") or shop.get("online_enabled"))
+
+
+@router.post("/create")
+def create_online_order(
+    payload: dict = Body(...),
+    request: Request = None,
+    user=Depends(get_current_user_optional),
+):
+    """Create an ONLINE order from a cart. Supports guest checkout via
+    `customer_info: {name, phone, email}` and logged-in customers via JWT."""
+    db = _get_db()
+
+    shop_slug = payload.get("shop_slug")
+    shop_id = payload.get("shop_id")
+    items_in = payload.get("items") or []
+    if not items_in:
+        raise HTTPException(status_code=400, detail="items is required")
+
+    shop = None
+    if shop_slug:
+        shop = db.shops.find_one({"slug": shop_slug})
+    elif shop_id:
+        shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+
+    if not _online_ok(shop):
+        raise HTTPException(status_code=403, detail="Shop is not selling online")
+
+    # Guest vs logged-in
+    customer_info = payload.get("customer_info") or {}
+    if user and user.get("role") == "customer":
+        customer_id = user["_id"]
+        customer_info = {
+            "name": customer_info.get("name") or user.get("full_name"),
+            "email": customer_info.get("email") or user.get("email"),
+            "phone": customer_info.get("phone") or user.get("phone"),
+        }
+    else:
+        customer_id = None
+        if not (customer_info.get("name") and (customer_info.get("email") or customer_info.get("phone"))):
+            raise HTTPException(
+                status_code=400,
+                detail="Guest checkout requires customer_info.name and either email or phone",
+            )
+
+    # Validate stock + compute total
+    total = 0.0
+    order_items = []
+    for it in items_in:
+        pid = it.get("product_id")
+        qty = int(it.get("quantity") or it.get("qty") or 0)
+        if not pid or qty <= 0:
+            raise HTTPException(status_code=400, detail="Invalid item")
+        product = _reserve_stock(db, pid, shop["_id"], qty)  # raises if insufficient
+        price = float(product.get("price", 0))
+        subtotal = round(price * qty, 2)
+        total += subtotal
+        order_items.append({
+            "product_id": product["_id"],
+            "name": product.get("name"),
+            "image": product.get("image"),
+            "quantity": qty,
+            "price": price,
+            "subtotal": subtotal,
+        })
+
+    order_id = str(_uuid.uuid4())
+    now = _dt.now(_tz.utc).isoformat()
+    order = {
+        "_id": order_id,
+        "shop_id": shop["_id"],
+        "shop_slug": shop.get("slug"),
+        "customer_id": customer_id,
+        "customer_info": customer_info,
+        "items": order_items,
+        "total": round(total, 2),
+        "total_amount": round(total, 2),  # alias for spec
+        "status": "pending",              # pending | paid | processing | completed | cancelled
+        "payment_status": "pending",      # pending | success | failed
+        "payment_method": None,
+        "payment_provider": None,
+        "order_source": "online",
+        "created_at": now,
+    }
+    db.orders.insert_one(order)
+    return {
+        "order_id": order_id,
+        "status": order["status"],
+        "total": order["total"],
+        "currency": "KES",
+        "items": order_items,
+        "shop": {"_id": shop["_id"], "name": shop.get("name"), "slug": shop.get("slug")},
+    }
+
+
+# =========================================================
+# 📋 OWNER — LIST ALL ORDERS (own shops only, online+pos)
+# =========================================================
+@router.get("")
+def list_owner_orders(
+    status: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = _get_db()
+    if user["role"] == "admin":
+        shop_ids = [s["_id"] for s in db.shops.find({}, {"_id": 1})]
+    else:
+        shop_ids = [s["_id"] for s in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})]
+
+    q = {"shop_id": {"$in": shop_ids}}
+    if status:
+        q["status"] = status
+    if source:
+        q["order_source"] = source
+
+    orders = list(db.orders.find(q).sort("created_at", -1).limit(200))
+    # include minimal shop context
+    shops = {s["_id"]: s for s in db.shops.find({"_id": {"$in": shop_ids}}, {"_id": 1, "name": 1, "slug": 1})}
+    for o in orders:
+        s = shops.get(o.get("shop_id")) or {}
+        o["shop_name"] = s.get("name")
+        o["shop_slug"] = s.get("slug")
+    return orders
+
+
+# =========================================================
+# 📄 SINGLE ORDER (owner or the customer who placed it)
+# =========================================================
+@router.get("/{order_id}")
+def get_order(order_id: str, user=Depends(get_current_user_optional)):
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    # Public read-only view if no auth — return a trimmed payload so the
+    # confirmation page works for guest checkout.
+    if not user:
+        return {
+            "_id": order["_id"],
+            "status": order.get("status"),
+            "payment_status": order.get("payment_status"),
+            "total": order.get("total"),
+            "items": order.get("items"),
+            "shop_id": order.get("shop_id"),
+            "shop_slug": order.get("shop_slug"),
+            "created_at": order.get("created_at"),
+        }
+
+    role = user.get("role")
+    if role in {"owner", "partner", "admin"}:
+        if role != "admin":
+            shop = db.shops.find_one({"_id": order.get("shop_id")})
+            if not shop or shop.get("owner_id") != user["_id"]:
+                raise HTTPException(status_code=403, detail="Not allowed")
+        return order
+
+    if role == "customer" and order.get("customer_id") == user["_id"]:
+        return order
+
+    # fallback: trimmed view
+    return {
+        "_id": order["_id"],
+        "status": order.get("status"),
+        "payment_status": order.get("payment_status"),
+        "total": order.get("total"),
+        "items": order.get("items"),
+    }
+
+
+# =========================================================
+# 🔄 OWNER — UPDATE ORDER STATUS (processing → completed, or cancel)
+# =========================================================
+@router.post("/{order_id}/status")
+def update_order_status(
+    order_id: str,
+    payload: dict = Body(...),
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if user["role"] != "admin":
+        shop = db.shops.find_one({"_id": order.get("shop_id")})
+        if not shop or shop.get("owner_id") != user["_id"]:
+            raise HTTPException(status_code=403, detail="Not allowed")
+
+    new_status = payload.get("status")
+    allowed = {"processing", "completed", "cancelled"}
+    if new_status not in allowed:
+        raise HTTPException(status_code=400, detail=f"status must be one of {allowed}")
+
+    # Simple state machine
+    current = order.get("status")
+    if current == "cancelled":
+        raise HTTPException(status_code=400, detail="Cancelled orders cannot transition")
+    if new_status == "completed" and current not in {"paid", "processing"}:
+        raise HTTPException(status_code=400, detail="Order must be paid or processing before completion")
+
+    db.orders.update_one(
+        {"_id": order_id},
+        {"$set": {"status": new_status, "status_updated_at": _dt.now(_tz.utc).isoformat()}},
+    )
+    return {"ok": True, "status": new_status}

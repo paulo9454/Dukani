@@ -1,9 +1,10 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from backend.core.security import decode_token
 from backend.db.mongo import get_db
 
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 
 # =========================
@@ -32,6 +33,28 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=401, detail="User not found")
 
     return user
+
+
+# =========================
+# 🔐 GET CURRENT USER (OPTIONAL — returns None if no/invalid token)
+# =========================
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials = Depends(security_optional),
+):
+    if not credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+    except Exception:
+        return None
+    if payload.get("type") != "access":
+        return None
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    db = get_db()
+    return db.users.find_one({"_id": user_id})
+
 
 
 # =========================

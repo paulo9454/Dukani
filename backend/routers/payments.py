@@ -1,23 +1,22 @@
-"""Payments router — Paystack + M-Pesa scaffolds.
+"""Payments router — Paystack + M-Pesa scaffolds wired to Orders.
 
-Real provider calls are NOT made yet. Each handler:
-  • Validates input
-  • Persists a Payment record in `payments` collection
-  • Returns the same shape the real integration will return
+Every payment attempt persists a row in `payments` and is linked to an order_id
+(when provided). On success the order moves to `paid`, on failure to `cancelled`.
 
-To go live:
-  - Paystack: implement the two TODO blocks (initialize and verify) using
-    POST https://api.paystack.co/transaction/initialize
-    GET  https://api.paystack.co/transaction/verify/{reference}
-    with `Authorization: Bearer {PAYSTACK_SECRET_KEY}`.
-  - M-Pesa Daraja: implement TODO blocks for STK push using the Daraja
-    sandbox/production endpoints with MPESA_CONSUMER_KEY/SECRET, MPESA_SHORTCODE,
-    MPESA_PASSKEY and webhook callback URL.
+To go LIVE:
+  Paystack: replace the two TODO blocks with requests.post(
+      "https://api.paystack.co/transaction/initialize",
+      headers={"Authorization": f"Bearer {os.environ['PAYSTACK_SECRET_KEY']}"},
+      json={"amount": int(amount*100), "email": email, "reference": reference,
+            "callback_url": f"{public_url}/payments/paystack/return?order_id={order_id}"}
+  )  and requests.get("https://api.paystack.co/transaction/verify/{reference}", ...).
 
-Required env vars (read from os.environ):
-  PAYSTACK_PUBLIC_KEY, PAYSTACK_SECRET_KEY
-  MPESA_CONSUMER_KEY, MPESA_CONSUMER_SECRET, MPESA_SHORTCODE, MPESA_PASSKEY,
-  MPESA_CALLBACK_URL
+  M-Pesa (Daraja):
+    1) Get OAuth token from /oauth/v1/generate?grant_type=client_credentials
+    2) Build STK Push payload with BusinessShortCode, Password=base64(shortcode+passkey+timestamp),
+       Timestamp, TransactionType, Amount, PartyA=phone, PartyB=shortcode, PhoneNumber=phone,
+       CallBackURL=os.environ['MPESA_CALLBACK_URL'], AccountReference=order_id, TransactionDesc
+    3) POST to /mpesa/stkpush/v1/processrequest and keep the CheckoutRequestID.
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from backend.core.deps import require_roles
+from backend.core.deps import require_roles, get_current_user_optional
 from backend.db.mongo import get_db
 
 
@@ -41,6 +40,30 @@ def _persist_payment(doc: dict) -> dict:
     db = get_db()
     db.payments.insert_one(doc)
     return doc
+
+
+def _mark_order_payment(order_id: str | None, status: str, method: str, provider: str):
+    """status: pending | success | failed."""
+    if not order_id:
+        return
+    db = get_db()
+    updates = {
+        "payment_status": status,
+        "payment_method": method,
+        "payment_provider": provider,
+        "payment_updated_at": _now_iso(),
+    }
+    if status == "success":
+        updates["status"] = "paid"
+    elif status == "failed":
+        updates["status"] = "cancelled"
+    db.orders.update_one({"_id": order_id}, {"$set": updates})
+
+
+def _get_order_or_none(order_id: str | None):
+    if not order_id:
+        return None
+    return get_db().orders.find_one({"_id": order_id})
 
 
 # =========================
@@ -64,14 +87,22 @@ def compare_providers():
 @router.post("/paystack/initialize")
 def paystack_initialize(
     payload: dict = Body(...),
-    user=Depends(require_roles("owner", "admin", "partner", "customer")),
+    user=Depends(get_current_user_optional),
 ):
     amount = payload.get("amount")
     email = payload.get("email")
-    shop_id = payload.get("shop_id")
     order_id = payload.get("order_id")
-    if not amount or not email:
-        raise HTTPException(status_code=400, detail="amount and email are required")
+    shop_id = payload.get("shop_id")
+
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    # If order_id supplied, read amount and shop_id from the order for integrity.
+    order = _get_order_or_none(order_id)
+    if order:
+        amount = float(order.get("total") or order.get("total_amount") or 0)
+        shop_id = order.get("shop_id")
+    if not amount:
+        raise HTTPException(status_code=400, detail="amount or order_id is required")
 
     reference = f"PSK-{uuid.uuid4().hex[:14]}"
     record = {
@@ -82,22 +113,27 @@ def paystack_initialize(
         "currency": payload.get("currency", "KES"),
         "shop_id": shop_id,
         "order_id": order_id,
-        "user_id": user["_id"],
+        "user_id": user["_id"] if user else None,
         "email": email,
         "status": "pending",
         "created_at": _now_iso(),
     }
     _persist_payment(record)
 
+    if order_id:
+        _mark_order_payment(order_id, "pending", "card", "paystack")
+
     public_key = os.getenv("PAYSTACK_PUBLIC_KEY", "")
-    # TODO (live): call Paystack /transaction/initialize and replace authorization_url below.
+
+    # TODO (live): call Paystack /transaction/initialize and return its authorization_url.
     return {
         "status": "initialized",
         "reference": reference,
+        "order_id": order_id,
         "amount": record["amount"],
         "currency": record["currency"],
         "public_key": public_key,
-        "authorization_url": None,  # filled by real Paystack call
+        "authorization_url": None,
         "provider": "paystack",
     }
 
@@ -107,7 +143,7 @@ def paystack_initialize(
 def paystack_verify(
     reference: str | None = None,
     payload: dict | None = Body(default=None),
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper", "customer")),
+    user=Depends(get_current_user_optional),
 ):
     ref = reference or ((payload or {}).get("reference"))
     if not ref:
@@ -115,18 +151,29 @@ def paystack_verify(
 
     db = get_db()
     record = db.payments.find_one({"reference": ref})
-    # TODO (live): call Paystack /transaction/verify/{ref} and use real status.
+
+    # TODO (live): call Paystack /transaction/verify/{ref} and use its real status.
     status = "failed" if str(ref).lower().startswith("fail") else "success"
+
     db.payments.update_one(
         {"reference": ref},
-        {"$set": {"status": status, "verified_at": _now_iso(), "verified_by": user["_id"]}},
+        {"$set": {
+            "status": status,
+            "verified_at": _now_iso(),
+            "verified_by": user["_id"] if user else None,
+        }},
         upsert=True,
     )
+
+    order_id = (record or {}).get("order_id")
+    _mark_order_payment(order_id, status, "card", "paystack")
+
     return {
         "verified": status == "success",
         "status": status,
         "reference": ref,
         "provider": "paystack",
+        "order_id": order_id,
         "amount": (record or {}).get("amount"),
     }
 
@@ -137,14 +184,22 @@ def paystack_verify(
 @router.post("/mpesa/stk-push")
 def mpesa_stk_push(
     payload: dict = Body(...),
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper", "customer")),
+    user=Depends(get_current_user_optional),
 ):
-    phone = (payload.get("phone") or "").strip()
+    phone = (payload.get("phone") or payload.get("phone_number") or "").strip()
     amount = payload.get("amount")
-    shop_id = payload.get("shop_id")
     order_id = payload.get("order_id")
-    if not phone or not amount:
-        raise HTTPException(status_code=400, detail="phone and amount are required")
+    shop_id = payload.get("shop_id")
+
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone is required")
+
+    order = _get_order_or_none(order_id)
+    if order:
+        amount = float(order.get("total") or order.get("total_amount") or 0)
+        shop_id = order.get("shop_id")
+    if not amount:
+        raise HTTPException(status_code=400, detail="amount or order_id is required")
 
     checkout_request_id = f"MPESA-{uuid.uuid4().hex[:16]}"
     record = {
@@ -155,30 +210,35 @@ def mpesa_stk_push(
         "currency": "KES",
         "shop_id": shop_id,
         "order_id": order_id,
-        "user_id": user["_id"],
+        "user_id": user["_id"] if user else None,
         "phone": phone,
         "status": "pending",
         "created_at": _now_iso(),
     }
     _persist_payment(record)
 
+    if order_id:
+        _mark_order_payment(order_id, "pending", "mpesa", "mpesa")
+
     shortcode = os.getenv("MPESA_SHORTCODE", "")
-    # TODO (live): obtain Daraja access token, build STK Push payload, POST to
-    # /mpesa/stkpush/v1/processrequest, capture CheckoutRequestID, return it.
+
+    # TODO (live): obtain Daraja access token + POST /mpesa/stkpush/v1/processrequest
+    # with AccountReference=order_id and CallBackURL=os.environ['MPESA_CALLBACK_URL'].
     return {
         "status": "initiated",
         "reference": checkout_request_id,
         "shortcode": shortcode,
         "amount": record["amount"],
         "phone": phone,
+        "order_id": order_id,
         "provider": "mpesa",
+        "message": "Check your phone to complete the M-Pesa payment",
     }
 
 
 @router.post("/mpesa/callback")
 def mpesa_callback(payload: dict = Body(...)):
-    """Public Daraja callback. Daraja posts a JSON body with Body.stkCallback.{
-        ResultCode, ResultDesc, CheckoutRequestID, CallbackMetadata...}"""
+    """Public Daraja callback. Parses Body.stkCallback.{ResultCode, CheckoutRequestID}."""
     db = get_db()
     body = payload.get("Body") or {}
     cb = body.get("stkCallback") or {}
@@ -186,7 +246,9 @@ def mpesa_callback(payload: dict = Body(...)):
     result_code = cb.get("ResultCode")
     status = "success" if result_code == 0 else "failed"
 
+    record = None
     if ref:
+        record = db.payments.find_one({"reference": ref})
         db.payments.update_one(
             {"reference": ref},
             {"$set": {
@@ -198,7 +260,11 @@ def mpesa_callback(payload: dict = Body(...)):
             }},
             upsert=True,
         )
-    # Daraja expects a 200 with this shape:
+
+    # Never trust frontend — the callback is the source of truth.
+    order_id = (record or {}).get("order_id")
+    _mark_order_payment(order_id, status, "mpesa", "mpesa")
+
     return {"ResultCode": 0, "ResultDesc": "Accepted"}
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../api/client";
+import CheckoutModal from "../components/CheckoutModal";
 
 /**
  * Public Shop Page — Shopify-style /shop/:slug
@@ -11,6 +12,7 @@ export default function PublicShopPage({ slug }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [cart, setCart] = useState([]);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -236,9 +238,7 @@ export default function PublicShopPage({ slug }) {
           </div>
           <button
             data-testid="public-shop-checkout"
-            onClick={() =>
-              alert("Checkout will be wired to Paystack / M-Pesa next.")
-            }
+            onClick={() => setCheckoutOpen(true)}
             style={{
               marginTop: 8,
               padding: "10px",
@@ -255,6 +255,14 @@ export default function PublicShopPage({ slug }) {
           </button>
         </div>
       )}
+
+      <CheckoutModal
+        open={checkoutOpen}
+        onClose={() => setCheckoutOpen(false)}
+        slug={slug}
+        cart={cart}
+        onSuccess={() => setCart([])}
+      />
     </div>
   );
 }
