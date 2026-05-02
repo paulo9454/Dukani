@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
 import uuid

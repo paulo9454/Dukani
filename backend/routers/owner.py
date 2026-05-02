@@ -225,8 +225,53 @@ def unassign_shopkeeper(shop_id: str, shopkeeper_id: str, user=Depends(require_r
 def get_sales(user=Depends(require_roles("owner", "admin", "partner"))):
     db = get_db()
     if user["role"] in {"owner", "partner"}:
-        shop_ids = [s["_id"] for s in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})]
-        query = {"shop_id": {"$in": shop_ids}}
+        shops = list(db.shops.find({"owner_id": user["_id"]}, {"_id": 1, "name": 1}))
     else:
-        query = {}
-    return list(db.sales.find(query))
+        shops = list(db.shops.find({}, {"_id": 1, "name": 1}))
+
+    shop_by_id = {s["_id"]: s.get("name") or s["_id"] for s in shops}
+    shop_ids = list(shop_by_id.keys())
+
+    orders = list(
+        db.orders.find(
+            {"shop_id": {"$in": shop_ids}, "payment_status": "confirmed"},
+            {"_id": 1, "shop_id": 1, "total": 1, "created_at": 1},
+        )
+        .sort("created_at", -1)
+    )
+
+    total_revenue = sum(float(o.get("total", 0)) for o in orders)
+    total_orders = len(orders)
+    avg_order = (total_revenue / total_orders) if total_orders else 0
+
+    per_shop = {}
+    for o in orders:
+        sid = o["shop_id"]
+        if sid not in per_shop:
+            per_shop[sid] = {
+                "shop_id": sid,
+                "shop_name": shop_by_id.get(sid, sid),
+                "revenue": 0.0,
+                "orders": 0,
+            }
+        per_shop[sid]["revenue"] += float(o.get("total", 0))
+        per_shop[sid]["orders"] += 1
+
+    recent = [
+        {
+            "_id": str(o["_id"]),
+            "shop_id": o["shop_id"],
+            "shop_name": shop_by_id.get(o["shop_id"], o["shop_id"]),
+            "total": float(o.get("total", 0)),
+            "created_at": o.get("created_at"),
+        }
+        for o in orders[:20]
+    ]
+
+    return {
+        "revenue": round(total_revenue, 2),
+        "orders": total_orders,
+        "avg_order": round(avg_order, 2),
+        "shops": list(per_shop.values()),
+        "recent": recent,
+    }

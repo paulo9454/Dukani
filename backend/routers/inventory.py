@@ -170,16 +170,16 @@ def restock_product(
     total_cost = float(payload.get("total_cost", 0))
     buying_price = float(payload.get("buying_price", 0))
 
-    if not shop_id or not product_id:
-        raise HTTPException(400, "shop_id and product_id required")
+    if not product_id:
+        raise HTTPException(400, "product_id required")
 
     if qty <= 0:
         raise HTTPException(400, "Invalid quantity")
 
-    product = db.products.find_one({
-        "_id": product_id,
-        "shop_id": shop_id
-    })
+    product_query = {"_id": product_id}
+    if shop_id:
+        product_query["shop_id"] = shop_id
+    product = db.products.find_one(product_query)
 
     if not product:
         raise HTTPException(404, "Product not found")
@@ -218,7 +218,7 @@ def restock_product(
     # =========================
     db.inventory_movements.insert_one({
         "_id": str(uuid.uuid4()),
-        "shop_id": shop_id,
+        "shop_id": product.get("shop_id"),
         "product_id": product_id,
         "type": "RESTOCK",
         "qty": qty,
