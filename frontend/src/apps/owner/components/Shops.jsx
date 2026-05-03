@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import API from "../../../api/client";
 import MPesaSettingsModal from "../../../components/MPesaSettingsModal";
+import { shareOnWhatsApp, copyShopLink } from "../../../utils/share";
+import { toast } from "../../../utils/toast";
 
 function Shops({ search = "" }) {
   const [shops, setShops] = useState([]);
@@ -212,16 +214,28 @@ function Shops({ search = "" }) {
                   plan: "pos_online",
                 });
                 await loadShops();
-                alert("✅ Online store activated!");
+                if (shop.slug) {
+                  toast("✅ Online store activated — tap Share on WhatsApp to invite customers.", { variant: "success", duration: 3200 });
+                } else {
+                  toast("✅ Online store activated!", { variant: "success" });
+                }
               } catch (err) {
-                alert(err?.response?.data?.detail || "Failed to subscribe");
+                toast(err?.response?.data?.detail || "Failed to subscribe");
               }
             };
 
-            const copyLink = () => {
-              if (!shareUrl) return;
-              navigator.clipboard?.writeText(shareUrl);
-              alert("Link copied: " + shareUrl);
+            const copyLink = async () => {
+              if (!shop.slug) return;
+              const ok = await copyShopLink(shop.slug);
+              toast(ok ? "Link copied" : "Could not copy link", {
+                variant: ok ? "success" : "default",
+              });
+            };
+
+            const whatsappShare = () => {
+              if (!shop.slug) return;
+              shareOnWhatsApp(shop.slug);
+              toast("Opening WhatsApp…");
             };
 
             return (
@@ -248,24 +262,56 @@ function Shops({ search = "" }) {
                       )}
                     </p>
                     {shareUrl && (
-                      <div style={{ marginTop: 6, fontSize: 12 }}>
+                      <div style={{ marginTop: 6, fontSize: 12, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
                         🔗 Public link:{" "}
-                        <a href={shareUrl} target="_blank" rel="noreferrer" style={{ color: "#0f766e" }}>
+                        <a href={shareUrl} target="_blank" rel="noreferrer" style={{ color: "#0f766e", wordBreak: "break-all" }}>
                           {shareUrl}
-                        </a>{" "}
+                        </a>
                         <button
                           data-testid={`copy-link-${shop._id}`}
                           onClick={copyLink}
-                          style={{ marginLeft: 6, padding: "2px 6px", fontSize: 11, cursor: "pointer" }}
+                          style={{
+                            padding: "6px 10px",
+                            minHeight: 32,
+                            fontSize: 12,
+                            cursor: "pointer",
+                            borderRadius: 6,
+                            border: "1px solid #e2e8f0",
+                            background: "white",
+                            color: "#0f172a",
+                            fontWeight: 600,
+                          }}
                         >
-                          Copy
+                          📋 Copy link
                         </button>
                       </div>
                     )}
                     <small style={{ color: "#94a3b8" }}>ID: {shop._id}</small>
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "stretch", minWidth: 170 }}>
+                    {shop.slug && (
+                      <button
+                        data-testid={`whatsapp-share-${shop._id}`}
+                        onClick={whatsappShare}
+                        style={{
+                          background: "#25D366",
+                          color: "white",
+                          border: "none",
+                          padding: "10px 14px",
+                          minHeight: 44,
+                          cursor: "pointer",
+                          borderRadius: 8,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                        }}
+                      >
+                        📲 Share on WhatsApp
+                      </button>
+                    )}
                     {!onlineActive && (
                       <button
                         data-testid={`upgrade-online-${shop._id}`}

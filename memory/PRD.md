@@ -89,6 +89,21 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — One-tap WhatsApp sharing
+- New `utils/share.js` — `shareOnWhatsApp(slug)` opens `wa.me/?text=...` in a
+  new tab with the exact template: "Check out my shop 🛒\n{url}\n\nOrder
+  easily and pay with M-Pesa." Popup-blocked fallback to same-tab nav.
+  `copyShopLink(slug)` uses Clipboard API with `execCommand` fallback for
+  insecure contexts / older Android browsers.
+- New `utils/toast.js` — dependency-free toast via a single DOM host node,
+  auto-dismiss 2s, `success` variant for green confirmation.
+- `Shops.jsx`: prominent 44 px "📲 Share on WhatsApp" button (WhatsApp brand
+  green `#25D366`) on every shop card that has a slug. Copy link restyled to
+  match with its own toast. `alert()` on online-store activation replaced
+  with a success toast that invites the owner to share.
+- Verified: button height 44 px, emoji 🛒 (U+1F6D2) preserved through
+  encodeURIComponent, wa.me URL correct with shop slug, lint clean.
+
 ## Session: Feb 2026 — Landing page
 - New `/` route for unauthenticated visitors: minimalist, mobile-first
   conversion page at `pages/LandingPage.jsx`.
