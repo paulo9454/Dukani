@@ -6,13 +6,20 @@ import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
 import OrderTrack from "./pages/OrderTrack";
+import LandingPage from "./pages/LandingPage";
 
 import OwnerShell from "./apps/owner/OwnerShell";
 import ShopkeeperHome from "./apps/Shopkeeper/ShopkeeperHome";
 import POS from "./apps/pos/PosApp";
 
 function App() {
-  const [authView, setAuthView] = useState("login");
+  // Initial auth view comes from the URL so /register and /login deep-link.
+  const initialAuthView = (() => {
+    const p = (typeof window !== "undefined" && window.location.pathname) || "/";
+    if (p.startsWith("/register")) return "register";
+    return "login";
+  })();
+  const [authView, setAuthView] = useState(initialAuthView);
   const [pendingVerification, setPendingVerification] = useState(null);
 
   const [token, setToken] = useState(() => localStorage.getItem("token"));
@@ -131,9 +138,17 @@ function App() {
       );
     }
 
+    // Root "/" for unauthenticated visitors → public landing page.
+    if (path === "/" || path === "") {
+      return <LandingPage />;
+    }
+
     return authView === "login" ? (
       <Login
-        onSwitch={() => setAuthView("register")}
+        onSwitch={() => {
+          setAuthView("register");
+          window.history.pushState({}, "", "/register");
+        }}
         onLogin={(data) => {
           localStorage.setItem("token", data.access_token);
           localStorage.setItem("user", JSON.stringify(data.user));
@@ -144,7 +159,10 @@ function App() {
       />
     ) : (
       <Register
-        onSwitch={() => setAuthView("login")}
+        onSwitch={() => {
+          setAuthView("login");
+          window.history.pushState({}, "", "/login");
+        }}
         onNeedsVerification={(email) => setPendingVerification({ email })}
       />
     );

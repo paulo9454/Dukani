@@ -89,6 +89,21 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Landing page
+- New `/` route for unauthenticated visitors: minimalist, mobile-first
+  conversion page at `pages/LandingPage.jsx`.
+- Sections: hero ("Sell online with M-Pesa in minutes."), live browser-chrome
+  shop preview (Mama Mboga Kitchen with 3 emoji products + cart + Pay with
+  M-Pesa), How it works (3 steps), 4 feature bullets, trust line, dark
+  final-CTA card, footer.
+- CTAs wire to `/register`. URL-aware auth view: `/register` and `/login`
+  deep-link into the correct form and history updates via `pushState` when
+  users toggle between them.
+- Authed owners still auto-redirect to `/owner`; track/order/shop routes
+  unchanged.
+- Verified: CTA navigates to /register, register form renders, CTA height
+  50 px, no horizontal overflow.
+
 ## Session: Feb 2026 — Test STK push
 - `POST /api/shop/{id}/mpesa-settings/test` fires a KES 1 STK push using the
   shop's saved Daraja credentials (no order created, no stock touched).
