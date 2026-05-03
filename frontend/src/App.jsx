@@ -226,10 +226,15 @@ function App() {
   } else if (path.startsWith("/owner")) {
     content = <OwnerShell user={user} />;
   } else {
+    // Unknown path while logged in → bounce to the right dashboard instead
+    // of a dead-end 404 (covers /login, /register, /dashboard, stale bookmarks).
+    const dest = user.role === "owner" ? "/owner" : "/shopkeeper";
+    if (typeof window !== "undefined" && window.location.pathname !== dest) {
+      window.location.replace(dest);
+    }
     content = (
       <div style={{ padding: 20 }}>
-        ❌ 404 Not Found <br />
-        <button onClick={() => (window.location.href = "/")}>Go Home</button>
+        Redirecting you to your dashboard…
       </div>
     );
   }
