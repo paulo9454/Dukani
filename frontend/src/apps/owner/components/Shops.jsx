@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import API from "../../../api/client";
+import MPesaSettingsModal from "../../../components/MPesaSettingsModal";
 
 function Shops({ search = "" }) {
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [mpesaShop, setMpesaShop] = useState(null);
 
   // =========================
   // CREATE SHOP STATE (FIXED)
@@ -294,6 +296,20 @@ function Shops({ search = "" }) {
                       🚀 Open POS
                     </button>
                     <button
+                      data-testid={`mpesa-settings-btn-${shop._id}`}
+                      onClick={() => setMpesaShop(shop)}
+                      style={{
+                        background: "#0f172a",
+                        color: "white",
+                        border: "none",
+                        padding: "8px 12px",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                      }}
+                    >
+                      💳 M-Pesa settings
+                    </button>
+                    <button
                       onClick={() => deleteShop(shop._id)}
                       style={{
                         background: "transparent",
@@ -314,6 +330,13 @@ function Shops({ search = "" }) {
           })
         )}
       </div>
+
+      <MPesaSettingsModal
+        open={!!mpesaShop}
+        shop={mpesaShop}
+        onClose={() => setMpesaShop(null)}
+        onSaved={loadShops}
+      />
     </div>
   );
 }

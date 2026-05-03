@@ -89,6 +89,33 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Merchant scalability pass
+- **Resend M-Pesa prompt**: new `POST /api/payments/mpesa/retry` re-fires
+  STK push for the same order without creating a new order / reserving stock
+  again. Guarded by `MPESA_MAX_RETRIES=3`, `MPESA_RETRY_COOLDOWN_SECS=15`,
+  and phone-match authorisation (falls back to owner/admin/partner role).
+  `CheckoutModal.jsx` shows the "Didn't receive the prompt?" tile only on
+  `timeout`/`failed`, restarts the 90 s countdown + polling on click, and
+  shows remaining retries / cooldown/limit errors inline.
+- **Per-shop M-Pesa config**: extended `shops` doc with
+  `mpesa_{consumer_key,consumer_secret,shortcode,passkey,env,business_name}`.
+  `_mpesa_cfg()` resolves per-shop first, env fallback second. New
+  `GET/PUT /api/shop/{id}/mpesa-settings` (owner-only, secrets returned
+  only as masked previews e.g. `ck•••••••••90`). New
+  `MPesaSettingsModal.jsx` wired to `Shops.jsx` via a `💳 M-Pesa settings`
+  button next to each shop. Saving only transmits fields the owner actually
+  typed, so blank input never wipes an existing secret.
+- **CORS hardening**: `server.py` picks origins from env — `DUKAYKO_DEV=1`
+  (dev/preview) keeps wildcard, production reads a comma-separated
+  `CORS_ALLOWED_ORIGINS`. Methods restricted to the six we use.
+- **Real-user observability**: `GET /api/analytics/shop/{id}` now returns a
+  `summary` block with views, add_to_cart, checkout_start, orders,
+  paid_orders, conversion_rate, paid_rate. Owner Dashboard renders a
+  per-shop funnel table using this summary.
+- Verified end-to-end via curl + browser: settings PUT/GET round-trips,
+  retry endpoint validates order existence, analytics summary calculates
+  correctly, CORS preflight still 200s on preview.
+
 ## Session: Feb 2026 — Track Order tile + M-Pesa live feedback
 - Added `GET /api/orders/lookup?phone=<>&slug=<>` — public endpoint, returns the
   most recent order for a phone number (optionally scoped to a shop slug).

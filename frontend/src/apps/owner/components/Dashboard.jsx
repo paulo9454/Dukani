@@ -9,6 +9,7 @@ function Dashboard() {
     assignments: 0,
     revenue: 0,
   });
+  const [analytics, setAnalytics] = useState([]); // per-shop 30-day summary
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -57,6 +58,24 @@ function Dashboard() {
           assignments,
           revenue,
         });
+
+        // Load 30-day analytics for each shop in parallel so owners see the
+        // real-world funnel right on the dashboard.
+        const analyticsResults = await Promise.allSettled(
+          shopList.map((s) =>
+            API.get(`/api/analytics/shop/${s._id}`).then((r) => ({
+              shop: s,
+              data: r.data?.summary || {},
+            }))
+          )
+        );
+        if (!cancelled) {
+          setAnalytics(
+            analyticsResults
+              .filter((r) => r.status === "fulfilled")
+              .map((r) => r.value)
+          );
+        }
       } catch (err) {
         console.error("Dashboard error:", err);
         if (!cancelled) setError("Failed to load dashboard. Please refresh.");
@@ -121,19 +140,71 @@ function Dashboard() {
         style={{
           marginTop: 30,
           padding: 20,
-          border: "1px solid #ddd",
+          border: "1px solid #e2e8f0",
           borderRadius: 10,
+          background: "#fff",
         }}
+        data-testid="shop-analytics-section"
       >
-        <h3>📈 Overview</h3>
-        <p>
-          Owner dashboard showing shops, shopkeepers, assignments and revenue
-          overview. Use the sidebar to manage shops, add shopkeepers, assign
-          them, and launch POS.
-        </p>
+        <h3 style={{ marginTop: 0 }}>📈 Shop funnel — last 30 days</h3>
+        {analytics.length === 0 ? (
+          <p style={{ color: "#475569", fontSize: 14 }}>
+            No analytics yet — once customers start visiting your shops, views, cart adds, checkouts and paid orders will show here with the live conversion rate.
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 14,
+                minWidth: 640,
+              }}
+            >
+              <thead>
+                <tr style={{ textAlign: "left", color: "#334155" }}>
+                  <th style={th}>Shop</th>
+                  <th style={th}>Views</th>
+                  <th style={th}>Add to cart</th>
+                  <th style={th}>Checkout</th>
+                  <th style={th}>Orders</th>
+                  <th style={th}>Paid</th>
+                  <th style={th}>Conv. rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.map(({ shop, data }) => (
+                  <tr
+                    key={shop._id}
+                    data-testid={`shop-funnel-${shop._id}`}
+                    style={{ borderTop: "1px solid #e2e8f0" }}
+                  >
+                    <td style={td}>
+                      <b style={{ color: "#0f172a" }}>{shop.name}</b>
+                      {shop.slug && (
+                        <div style={{ fontSize: 12, color: "#64748b" }}>/shop/{shop.slug}</div>
+                      )}
+                    </td>
+                    <td style={td}>{data.views || 0}</td>
+                    <td style={td}>{data.add_to_cart || 0}</td>
+                    <td style={td}>{data.checkout_start || 0}</td>
+                    <td style={td}>{data.orders || 0}</td>
+                    <td style={td}>{data.paid_orders || 0}</td>
+                    <td style={{ ...td, fontWeight: 700, color: "#15803d" }}>
+                      {(data.conversion_rate || 0).toFixed(1)}%
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+const th = { padding: "8px 10px", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.3 };
+const td = { padding: "10px 10px", color: "#0f172a" };
 
 export default Dashboard;

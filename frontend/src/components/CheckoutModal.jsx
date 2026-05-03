@@ -8,7 +8,11 @@ import API from "../api/client";
  * On M-Pesa we poll /api/orders/track/{id}?contact=<phone> every 3 s for up
  * to 90 s so the customer sees the payment status flip from pending →
  * success / failed in real time, without needing to refresh.
+ * If it times out or fails, a "Resend M-Pesa prompt" button triggers
+ * POST /api/payments/mpesa/retry (max 3 retries enforced server-side).
  */
+const POLL_TIMEOUT_SECS = 90;
+
 export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
@@ -17,17 +21,18 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
-  // Live polling state (M-Pesa only)
+  // Live polling / retry state (M-Pesa only)
   const [paymentState, setPaymentState] = useState("idle"); // idle|waiting|success|failed|timeout
   const [secondsLeft, setSecondsLeft] = useState(0);
+  const [retryLoading, setRetryLoading] = useState(false);
+  const [retryError, setRetryError] = useState("");
+  const [retriesLeft, setRetriesLeft] = useState(null); // null = unknown / not used
   const pollRef = useRef(null);
   const countdownRef = useRef(null);
+  const timeoutRef = useRef(null);
 
   useEffect(() => {
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
-    };
+    return () => stopPolling();
   }, []);
 
   if (!open) return null;
@@ -38,20 +43,15 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
   );
   const formatKES = (n) => "KES " + Number(n || 0).toLocaleString();
 
-  const stopPolling = () => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
-    }
-  };
+  function stopPolling() {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+  }
 
-  const startPolling = (orderId, cleanPhone) => {
-    const TIMEOUT_SECS = 90;
-    setSecondsLeft(TIMEOUT_SECS);
+  function startPolling(orderId, cleanPhone) {
+    stopPolling();
+    setSecondsLeft(POLL_TIMEOUT_SECS);
     setPaymentState("waiting");
 
     countdownRef.current = setInterval(() => {
@@ -72,19 +72,15 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
           stopPolling();
         }
       } catch {
-        /* keep polling — may be a transient network blip */
+        /* transient — keep polling */
       }
     }, 3000);
 
-    // Hard stop after TIMEOUT_SECS
-    setTimeout(() => {
-      if (pollRef.current) {
-        stopPolling();
-        // Only flip to timeout if still waiting
-        setPaymentState((prev) => (prev === "waiting" ? "timeout" : prev));
-      }
-    }, TIMEOUT_SECS * 1000);
-  };
+    timeoutRef.current = setTimeout(() => {
+      stopPolling();
+      setPaymentState((prev) => (prev === "waiting" ? "timeout" : prev));
+    }, POLL_TIMEOUT_SECS * 1000);
+  }
 
   const pay = async () => {
     const clean = (phone || "").replace(/\s|-/g, "");
@@ -122,14 +118,37 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         payment: payRes?.data,
       });
 
-      // Kick off live polling for M-Pesa
       if (method === "mpesa") startPolling(orderId, clean);
-
       onSuccess?.(orderId);
     } catch (err) {
       setError(err?.response?.data?.detail || "Checkout failed");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resendMpesa = async () => {
+    if (!result?.order_id || !result?.phone) return;
+    try {
+      setRetryError("");
+      setRetryLoading(true);
+      const r = await API.post("/api/payments/mpesa/retry", {
+        order_id: result.order_id,
+        phone: result.phone,
+      });
+      if (typeof r.data?.retries_left === "number") {
+        setRetriesLeft(r.data.retries_left);
+      }
+      startPolling(result.order_id, result.phone);
+    } catch (err) {
+      const status = err?.response?.status;
+      const detail = err?.response?.data?.detail || "Could not resend M-Pesa prompt";
+      setRetryError(detail);
+      if (status === 429) {
+        // exhausted — stay on current view
+      }
+    } finally {
+      setRetryLoading(false);
     }
   };
 
@@ -161,6 +180,8 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
     }
 
     // M-Pesa — live status view
+    const showResend = paymentState === "timeout" || paymentState === "failed";
+
     return (
       <div style={backdrop}>
         <div style={modal} data-testid="mpesa-status-modal">
@@ -172,8 +193,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
                   📲 Check your phone
                 </h2>
                 <p style={{ margin: "0 0 6px", color: "#334155", fontSize: 15 }}>
-                  We&apos;ve sent an M-Pesa prompt to
-                  {" "}<b>{result.phone}</b>.
+                  We&apos;ve sent an M-Pesa prompt to <b>{result.phone}</b>.
                 </p>
                 <p style={{ margin: "0 0 14px", color: "#475569", fontSize: 14 }}>
                   Enter your M-Pesa PIN to complete payment of{" "}
@@ -218,7 +238,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
               <h2 style={{ margin: "6px 0", color: "#b91c1c" }}>Payment failed</h2>
               <p style={{ color: "#334155", fontSize: 14 }}>
                 You may have cancelled the prompt, entered the wrong PIN, or had
-                insufficient balance. Try again any time.
+                insufficient balance. Try again — no order is lost.
               </p>
             </div>
           )}
@@ -233,6 +253,57 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
                 We didn&apos;t get a confirmation yet. If you&apos;ve already
                 paid, the order will update when Safaricom notifies us.
               </p>
+            </div>
+          )}
+
+          {showResend && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: 12,
+                background: "#f1f5f9",
+                borderRadius: 10,
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                Didn&apos;t receive the prompt?
+              </div>
+              <button
+                data-testid="mpesa-resend-btn"
+                onClick={resendMpesa}
+                disabled={retryLoading}
+                style={{
+                  padding: "12px 16px",
+                  minHeight: 46,
+                  width: "100%",
+                  background: "#0f172a",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 8,
+                  fontWeight: 700,
+                  cursor: retryLoading ? "wait" : "pointer",
+                  opacity: retryLoading ? 0.7 : 1,
+                }}
+              >
+                {retryLoading ? "Sending…" : "🔁 Resend M-Pesa prompt"}
+              </button>
+              {retriesLeft !== null && retriesLeft >= 0 && (
+                <div
+                  data-testid="mpesa-retries-left"
+                  style={{ fontSize: 12, color: "#475569", marginTop: 6 }}
+                >
+                  {retriesLeft} retr{retriesLeft === 1 ? "y" : "ies"} left
+                </div>
+              )}
+              {retryError && (
+                <div
+                  data-testid="mpesa-resend-error"
+                  style={{ color: "#dc2626", fontSize: 12, marginTop: 6 }}
+                >
+                  {retryError}
+                </div>
+              )}
             </div>
           )}
 
@@ -432,7 +503,6 @@ const spinner = {
   animation: "dukayko-spin 0.9s linear infinite",
 };
 
-// keyframes are injected once
 if (typeof document !== "undefined" && !document.getElementById("dk-spin-kf")) {
   const s = document.createElement("style");
   s.id = "dk-spin-kf";

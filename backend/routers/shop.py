@@ -143,3 +143,81 @@ def get_my_shops(
     shops = list(db.shops.find({"_id": {"$in": shop_ids}}))
 
     return [{**s, "_id": str(s["_id"])} for s in shops]
+
+
+# =========================
+# 💳 GET M-PESA SETTINGS  (owner only, secrets masked)
+# =========================
+def _mask(value: str | None) -> str:
+    if not value:
+        return ""
+    s = str(value)
+    if len(s) <= 4:
+        return "*" * len(s)
+    return s[:2] + "•" * (len(s) - 4) + s[-2:]
+
+
+@router.get("/{shop_id}/mpesa-settings")
+def get_mpesa_settings(
+    shop_id: str,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = get_db()
+    shop = get_shop(db, shop_id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    assert_shop_access(user, shop)
+
+    return {
+        "shop_id": shop_id,
+        "mpesa_configured": bool(
+            shop.get("mpesa_consumer_key")
+            and shop.get("mpesa_consumer_secret")
+            and shop.get("mpesa_shortcode")
+            and shop.get("mpesa_passkey")
+        ),
+        "mpesa_shortcode": shop.get("mpesa_shortcode", ""),
+        "mpesa_business_name": shop.get("mpesa_business_name", ""),
+        "mpesa_env": shop.get("mpesa_env", "sandbox"),
+        # Sensitive fields are never returned in full — only masked preview.
+        "mpesa_consumer_key_masked": _mask(shop.get("mpesa_consumer_key")),
+        "mpesa_consumer_secret_masked": _mask(shop.get("mpesa_consumer_secret")),
+        "mpesa_passkey_masked": _mask(shop.get("mpesa_passkey")),
+    }
+
+
+@router.put("/{shop_id}/mpesa-settings")
+def update_mpesa_settings(
+    shop_id: str,
+    payload: dict,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = get_db()
+    shop = get_shop(db, shop_id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    assert_shop_access(user, shop)
+
+    # Only update fields that were actually sent so an empty input doesn't
+    # wipe a previously-saved value.
+    updates: dict = {}
+    for k in (
+        "mpesa_consumer_key",
+        "mpesa_consumer_secret",
+        "mpesa_shortcode",
+        "mpesa_passkey",
+        "mpesa_business_name",
+        "mpesa_env",
+    ):
+        v = payload.get(k)
+        if v is not None and str(v).strip():
+            updates[k] = str(v).strip()
+
+    if updates.get("mpesa_env") and updates["mpesa_env"] not in {"sandbox", "production"}:
+        raise HTTPException(status_code=400, detail="mpesa_env must be 'sandbox' or 'production'")
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    db.shops.update_one({"_id": shop_id}, {"$set": updates})
+    return {"ok": True, "updated_fields": sorted(updates.keys())}

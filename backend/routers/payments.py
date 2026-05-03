@@ -312,28 +312,85 @@ async def paystack_webhook(
 
 
 # ─────────────────────────────────────────────────────────────────
-# M-PESA (Safaricom Daraja)
+# M-PESA (Safaricom Daraja) — per-shop config with env fallback
 # ─────────────────────────────────────────────────────────────────
-def _mpesa_live() -> bool:
-    return bool(os.getenv("MPESA_CONSUMER_KEY") and os.getenv("MPESA_CONSUMER_SECRET")
-                and os.getenv("MPESA_SHORTCODE") and os.getenv("MPESA_PASSKEY"))
+MPESA_MAX_RETRIES = 3
+MPESA_RETRY_COOLDOWN_SECS = 15  # prevents STK-push spam
 
 
-def _mpesa_token() -> str | None:
+def _mpesa_cfg(shop: dict | None) -> dict:
+    """Resolve M-Pesa config. Shop-level fields win over env vars so each
+    owner can wire their own PayBill/Till. Falls back to env (useful in
+    dev/sandbox). Returns dict with consumer_key/consumer_secret/shortcode/
+    passkey/env/business_name — or empty strings when unset."""
+    shop = shop or {}
+    return {
+        "consumer_key": shop.get("mpesa_consumer_key") or os.getenv("MPESA_CONSUMER_KEY", ""),
+        "consumer_secret": shop.get("mpesa_consumer_secret") or os.getenv("MPESA_CONSUMER_SECRET", ""),
+        "shortcode": shop.get("mpesa_shortcode") or os.getenv("MPESA_SHORTCODE", ""),
+        "passkey": shop.get("mpesa_passkey") or os.getenv("MPESA_PASSKEY", ""),
+        "env": shop.get("mpesa_env") or os.getenv("MPESA_ENV", "sandbox"),
+        "business_name": shop.get("mpesa_business_name") or shop.get("name") or "Dukayko",
+    }
+
+
+def _mpesa_cfg_complete(cfg: dict) -> bool:
+    return bool(cfg["consumer_key"] and cfg["consumer_secret"]
+                and cfg["shortcode"] and cfg["passkey"])
+
+
+def _mpesa_token_for(cfg: dict) -> str | None:
     try:
-        consumer = os.environ["MPESA_CONSUMER_KEY"]
-        secret = os.environ["MPESA_CONSUMER_SECRET"]
-        env = os.getenv("MPESA_ENV", "sandbox")
-        host = "https://api.safaricom.co.ke" if env == "production" else "https://sandbox.safaricom.co.ke"
+        host = "https://api.safaricom.co.ke" if cfg["env"] == "production" else "https://sandbox.safaricom.co.ke"
         resp = httpx.get(
             f"{host}/oauth/v1/generate?grant_type=client_credentials",
-            auth=(consumer, secret),
+            auth=(cfg["consumer_key"], cfg["consumer_secret"]),
             timeout=15,
         )
         return (resp.json() or {}).get("access_token")
     except Exception as exc:
         logger.exception("mpesa token error: %s", exc)
         return None
+
+
+def _stk_push(cfg: dict, order_id: str | None, amount: float, phone: str) -> tuple[str, dict | None]:
+    """Fire a Daraja STK push using the given shop config. Returns
+    (checkout_request_id, raw_response). When cfg is incomplete we fall back
+    to a sandbox-safe stub so dev/preview keeps flowing."""
+    checkout_request_id = f"MPESA-{uuid.uuid4().hex[:16]}"
+    if not _mpesa_cfg_complete(cfg):
+        return checkout_request_id, None
+    try:
+        token = _mpesa_token_for(cfg)
+        if not token:
+            return checkout_request_id, None
+        host = "https://api.safaricom.co.ke" if cfg["env"] == "production" else "https://sandbox.safaricom.co.ke"
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        pwd = base64.b64encode(f"{cfg['shortcode']}{cfg['passkey']}{ts}".encode()).decode()
+        resp = httpx.post(
+            f"{host}/mpesa/stkpush/v1/processrequest",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "BusinessShortCode": cfg["shortcode"],
+                "Password": pwd,
+                "Timestamp": ts,
+                "TransactionType": "CustomerPayBillOnline",
+                "Amount": int(round(float(amount))),
+                "PartyA": phone,
+                "PartyB": cfg["shortcode"],
+                "PhoneNumber": phone,
+                "CallBackURL": os.getenv("MPESA_CALLBACK_URL", ""),
+                "AccountReference": (order_id or checkout_request_id)[:12],
+                "TransactionDesc": f"{cfg['business_name']} order payment"[:20],
+            },
+            timeout=20,
+        )
+        daraja = resp.json()
+        daraja_id = daraja.get("CheckoutRequestID")
+        return (daraja_id or checkout_request_id), daraja
+    except Exception as exc:
+        logger.exception("mpesa stk push exception: %s", exc)
+        return checkout_request_id, None
 
 
 @router.post("/mpesa/stk-push")
@@ -351,6 +408,7 @@ def mpesa_stk_push(
     if _already_paid(order_id):
         raise HTTPException(status_code=409, detail="This order is already paid.")
 
+    db = get_db()
     order = _get_order_or_none(order_id)
     if order:
         amount = float(order.get("total") or order.get("total_amount") or 0)
@@ -358,7 +416,19 @@ def mpesa_stk_push(
     if not amount:
         raise HTTPException(status_code=400, detail="amount or order_id is required")
 
-    checkout_request_id = f"MPESA-{uuid.uuid4().hex[:16]}"
+    shop = db.shops.find_one({"_id": shop_id}) if shop_id else None
+    cfg = _mpesa_cfg(shop)
+
+    # If shop lookup succeeded and it has NO config and there's no env
+    # fallback either, fail early with a clear merchant-facing message.
+    if shop and not _mpesa_cfg_complete(cfg) and not os.getenv("MPESA_CONSUMER_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="Shop has not configured M-Pesa yet. Ask the owner to add their Daraja keys in Shop Settings.",
+        )
+
+    checkout_request_id, daraja_response = _stk_push(cfg, order_id, amount, phone)
+
     record = {
         "_id": str(uuid.uuid4()),
         "reference": checkout_request_id,
@@ -371,68 +441,119 @@ def mpesa_stk_push(
         "phone": phone,
         "status": "pending",
         "created_at": _now_iso(),
+        "daraja_response": daraja_response,
+        "retry_count": 0,
     }
     _persist_payment(record)
     if order_id:
         _mark_order_payment(order_id, "pending", "mpesa", "mpesa")
-
-    daraja_request_id = None
-    daraja_response = None
-
-    if _mpesa_live():
-        try:
-            token = _mpesa_token()
-            if token:
-                env = os.getenv("MPESA_ENV", "sandbox")
-                host = "https://api.safaricom.co.ke" if env == "production" else "https://sandbox.safaricom.co.ke"
-                shortcode = os.environ["MPESA_SHORTCODE"]
-                passkey = os.environ["MPESA_PASSKEY"]
-                ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-                pwd = base64.b64encode(f"{shortcode}{passkey}{ts}".encode()).decode()
-                resp = httpx.post(
-                    f"{host}/mpesa/stkpush/v1/processrequest",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "BusinessShortCode": shortcode,
-                        "Password": pwd,
-                        "Timestamp": ts,
-                        "TransactionType": "CustomerPayBillOnline",
-                        "Amount": int(round(float(amount))),
-                        "PartyA": phone,
-                        "PartyB": shortcode,
-                        "PhoneNumber": phone,
-                        "CallBackURL": os.getenv("MPESA_CALLBACK_URL", ""),
-                        "AccountReference": (order_id or checkout_request_id)[:12],
-                        "TransactionDesc": "Dukayko order payment",
-                    },
-                    timeout=20,
-                )
-                daraja_response = resp.json()
-                daraja_request_id = daraja_response.get("CheckoutRequestID")
-                if daraja_request_id:
-                    # Re-key the payment by the Daraja-issued ID so the callback
-                    # (which only carries CheckoutRequestID) can find it.
-                    get_db().payments.update_one(
-                        {"reference": checkout_request_id},
-                        {"$set": {
-                            "reference": daraja_request_id,
-                            "internal_reference": checkout_request_id,
-                            "daraja_response": daraja_response,
-                        }},
-                    )
-                    checkout_request_id = daraja_request_id
-        except Exception as exc:
-            logger.exception("mpesa stk push exception: %s", exc)
+        # track retry budget on the order
+        db.orders.update_one(
+            {"_id": order_id},
+            {"$setOnInsert": {"mpesa_retry_count": 0}, "$set": {"last_stk_at": _now_iso()}},
+            upsert=False,
+        )
 
     return {
         "status": "initiated",
         "reference": checkout_request_id,
-        "shortcode": os.getenv("MPESA_SHORTCODE", ""),
+        "shortcode": cfg["shortcode"],
         "amount": record["amount"],
         "phone": phone,
         "order_id": order_id,
         "provider": "mpesa",
         "message": "Check your phone to complete the M-Pesa payment",
+    }
+
+
+@router.post("/mpesa/retry")
+def mpesa_retry(
+    payload: dict = Body(...),
+    user=Depends(get_current_user_optional),
+):
+    """Re-send an STK push for an existing order without creating a new
+    order or touching stock. Enforces a retry limit + cooldown to stop
+    abuse / accidental spam."""
+    order_id = (payload.get("order_id") or "").strip()
+    phone = (payload.get("phone") or payload.get("phone_number") or "").strip()
+
+    if not order_id:
+        raise HTTPException(status_code=400, detail="order_id is required")
+    if not phone:
+        raise HTTPException(status_code=400, detail="phone is required")
+
+    db = get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("payment_status") == "success":
+        raise HTTPException(status_code=409, detail="This order is already paid.")
+
+    # Authorise: the phone on the order must match the caller's phone
+    # (phone-based guest auth) — or the caller is the shop owner / admin.
+    info = order.get("customer_info") or {}
+    order_phone = (info.get("phone") or order.get("phone_number") or "").strip()
+    if order_phone and order_phone != phone:
+        if not user or user.get("role") not in {"owner", "admin", "partner"}:
+            raise HTTPException(status_code=403, detail="Phone does not match this order")
+
+    # Retry budget & cooldown
+    retry_count = int(order.get("mpesa_retry_count") or 0)
+    if retry_count >= MPESA_MAX_RETRIES:
+        raise HTTPException(
+            status_code=429,
+            detail=f"M-Pesa retry limit reached ({MPESA_MAX_RETRIES}). Please start a new checkout.",
+        )
+    last_stk = order.get("last_stk_at")
+    if last_stk:
+        try:
+            last_dt = datetime.fromisoformat(last_stk.replace("Z", "+00:00"))
+            if (datetime.now(timezone.utc) - last_dt).total_seconds() < MPESA_RETRY_COOLDOWN_SECS:
+                raise HTTPException(
+                    status_code=429,
+                    detail="Please wait a few seconds before retrying.",
+                )
+        except ValueError:
+            pass
+
+    amount = float(order.get("total") or order.get("total_amount") or 0)
+    shop = db.shops.find_one({"_id": order.get("shop_id")}) if order.get("shop_id") else None
+    cfg = _mpesa_cfg(shop)
+
+    if shop and not _mpesa_cfg_complete(cfg) and not os.getenv("MPESA_CONSUMER_KEY"):
+        raise HTTPException(
+            status_code=503,
+            detail="Shop has not configured M-Pesa yet.",
+        )
+
+    checkout_request_id, daraja_response = _stk_push(cfg, order_id, amount, phone)
+
+    _persist_payment({
+        "_id": str(uuid.uuid4()),
+        "reference": checkout_request_id,
+        "provider": "mpesa",
+        "amount": amount,
+        "currency": "KES",
+        "shop_id": order.get("shop_id"),
+        "order_id": order_id,
+        "user_id": user["_id"] if user else None,
+        "phone": phone,
+        "status": "pending",
+        "created_at": _now_iso(),
+        "daraja_response": daraja_response,
+        "is_retry": True,
+        "retry_count": retry_count + 1,
+    })
+    db.orders.update_one(
+        {"_id": order_id},
+        {"$inc": {"mpesa_retry_count": 1}, "$set": {"last_stk_at": _now_iso(), "payment_status": "pending"}},
+    )
+
+    return {
+        "success": True,
+        "reference": checkout_request_id,
+        "retries_left": MPESA_MAX_RETRIES - (retry_count + 1),
+        "message": "New M-Pesa prompt sent. Check your phone.",
     }
 
 

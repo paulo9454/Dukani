@@ -63,11 +63,24 @@ app.mount("/api/static", StaticFiles(directory=STATIC_DIR), name="api_static")
 # =========================
 # MIDDLEWARE
 # =========================
+# CORS: wide-open in dev/preview (`DUKAYKO_DEV=1`), locked to an explicit
+# allow-list in production via `CORS_ALLOWED_ORIGINS` (comma-separated).
+# Preview/local stay permissive so testing keeps working.
+_cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "").strip()
+_is_dev = os.getenv("DUKAYKO_DEV", "").strip() in {"1", "true", "yes"} or not _cors_env
+
+if _is_dev:
+    _allow_origins = ["*"]
+    _allow_credentials = False  # wildcard requires credentials=false per spec
+else:
+    _allow_origins = [o.strip() for o in _cors_env.split(",") if o.strip()]
+    _allow_credentials = True
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_allow_origins,
+    allow_credentials=_allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

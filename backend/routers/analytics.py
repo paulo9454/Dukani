@@ -50,7 +50,29 @@ def shop_analytics(
     for ev in EVENT_TYPES:
         counts[ev] = db.analytics.count_documents({**base, "event_type": ev})
 
+    # Owner-facing summary (what merchants actually care about).
+    views = counts.get("view_shop", 0)
+    add_to_cart = counts.get("add_to_cart", 0)
+    checkout_start = counts.get("checkout_start", 0)
+    orders = db.orders.count_documents({"shop_id": shop_id, "created_at": {"$gte": cutoff}})
+    paid_orders = db.orders.count_documents({
+        "shop_id": shop_id,
+        "created_at": {"$gte": cutoff},
+        "payment_status": "success",
+    })
+    conversion_rate = round((orders / views) * 100, 2) if views else 0.0
+    paid_rate = round((paid_orders / orders) * 100, 2) if orders else 0.0
+
     return {
         "window_days": 30,
         "events": counts,
+        "summary": {
+            "views": views,
+            "add_to_cart": add_to_cart,
+            "checkout_start": checkout_start,
+            "orders": orders,
+            "paid_orders": paid_orders,
+            "conversion_rate": conversion_rate,
+            "paid_rate": paid_rate,
+        },
     }
