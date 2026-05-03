@@ -22,6 +22,11 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
 
+  // Test STK push state
+  const [testPhone, setTestPhone] = useState("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // {ok, message} | {error}
+
   useEffect(() => {
     if (!open || !shop?._id) return;
     (async () => {
@@ -71,11 +76,53 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
       await API.put(`/api/shop/${shop._id}/mpesa-settings`, payload);
       setSaved(true);
       onSaved?.();
-      setTimeout(onClose, 900);
+      // Reload so the "Configured" chip and masked previews refresh,
+      // and the owner can run Test STK push against the freshly-saved keys
+      // without closing the modal.
+      try {
+        const r = await API.get(`/api/shop/${shop._id}/mpesa-settings`);
+        setCurrent(r.data);
+        setForm((prev) => ({
+          ...prev,
+          mpesa_consumer_key: "",
+          mpesa_consumer_secret: "",
+          mpesa_passkey: "",
+        }));
+      } catch {
+        /* ignore — non-fatal */
+      }
     } catch (err) {
       setError(err?.response?.data?.detail || "Failed to save");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const runTest = async () => {
+    const clean = (testPhone || "").replace(/\s|-/g, "");
+    if (!clean || clean.length < 9) {
+      setTestResult({ error: "Enter a valid phone number (e.g. 254712345678)" });
+      return;
+    }
+    try {
+      setTesting(true);
+      setTestResult(null);
+      const r = await API.post(
+        `/api/shop/${shop._id}/mpesa-settings/test`,
+        { phone: clean }
+      );
+      setTestResult({
+        ok: true,
+        message: r.data?.message || "Test prompt sent. Check your phone.",
+        reference: r.data?.reference,
+        env: r.data?.env,
+      });
+    } catch (err) {
+      setTestResult({
+        error: err?.response?.data?.detail || "Test failed. Check credentials and try again.",
+      });
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -188,6 +235,98 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
               <p data-testid="mpesa-saved" style={{ color: "#15803d", fontSize: 13, marginTop: 8 }}>
                 ✅ Saved
               </p>
+            )}
+
+            {/* ─── Test STK push ─── */}
+            {current?.mpesa_configured && (
+              <div
+                data-testid="mpesa-test-section"
+                style={{
+                  marginTop: 16,
+                  padding: 14,
+                  background: "#f1f5f9",
+                  borderRadius: 10,
+                  border: "1px solid #e2e8f0",
+                }}
+              >
+                <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>
+                  🧪 Test STK push
+                </div>
+                <div style={{ fontSize: 12, color: "#475569", marginBottom: 10 }}>
+                  Send a <b>KES&nbsp;1</b> prompt to your phone to verify keys
+                  work — no order is created, no stock is touched.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input
+                    data-testid="mpesa-test-phone"
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="Your phone (254712345678)"
+                    value={testPhone}
+                    onChange={(e) => {
+                      setTestPhone(e.target.value);
+                      if (testResult) setTestResult(null);
+                    }}
+                    style={{ ...input, flex: "1 1 180px", marginTop: 0 }}
+                  />
+                  <button
+                    data-testid="mpesa-test-btn"
+                    onClick={runTest}
+                    disabled={testing}
+                    style={{
+                      minHeight: 42,
+                      padding: "0 16px",
+                      background: "#0f172a",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      fontWeight: 700,
+                      cursor: testing ? "wait" : "pointer",
+                      opacity: testing ? 0.7 : 1,
+                    }}
+                  >
+                    {testing ? "Sending…" : "Send test prompt"}
+                  </button>
+                </div>
+                {testResult?.ok && (
+                  <div
+                    data-testid="mpesa-test-success"
+                    style={{
+                      marginTop: 10,
+                      background: "#dcfce7",
+                      color: "#15803d",
+                      padding: 10,
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    ✅ {testResult.message}
+                    {testResult.env && (
+                      <div style={{ fontSize: 11, opacity: 0.85, marginTop: 2 }}>
+                        Environment: <b>{testResult.env}</b>
+                        {testResult.reference && (
+                          <> · Ref: <code>{testResult.reference}</code></>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {testResult?.error && (
+                  <div
+                    data-testid="mpesa-test-error"
+                    style={{
+                      marginTop: 10,
+                      background: "#fee2e2",
+                      color: "#991b1b",
+                      padding: 10,
+                      borderRadius: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    ❌ {testResult.error}
+                  </div>
+                )}
+              </div>
             )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>

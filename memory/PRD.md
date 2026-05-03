@@ -89,6 +89,18 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Test STK push
+- `POST /api/shop/{id}/mpesa-settings/test` fires a KES 1 STK push using the
+  shop's saved Daraja credentials (no order created, no stock touched).
+- Differentiates errors clearly: 400 missing keys / bad phone · 403 wrong
+  role · 502 Daraja rejection with copy "Double-check consumer key, consumer
+  secret, shortcode, passkey, environment."
+- UI: "🧪 Test STK push" tile inside `MPesaSettingsModal` appears only when
+  `mpesa_configured=true`. Phone input + "Send test prompt" button; success
+  banner shows reference + environment, error banner shows Daraja detail.
+- After Save, modal re-fetches settings so the Test tile appears immediately
+  on first configure (no need to reopen).
+
 ## Session: Feb 2026 — Merchant scalability pass
 - **Resend M-Pesa prompt**: new `POST /api/payments/mpesa/retry` re-fires
   STK push for the same order without creating a new order / reserving stock

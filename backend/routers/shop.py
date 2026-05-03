@@ -221,3 +221,70 @@ def update_mpesa_settings(
 
     db.shops.update_one({"_id": shop_id}, {"$set": updates})
     return {"ok": True, "updated_fields": sorted(updates.keys())}
+
+
+@router.post("/{shop_id}/mpesa-settings/test")
+def test_mpesa_stk_push(
+    shop_id: str,
+    payload: dict,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    """Fire a KES 1 sandbox/production STK push using the shop's saved
+    Daraja credentials. No order is created and no stock is touched — this
+    is purely a credential-verification tool for the owner."""
+    from backend.routers.payments import _mpesa_cfg, _mpesa_cfg_complete, _stk_push
+
+    phone = (payload.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    if not phone or len(phone) < 9:
+        raise HTTPException(status_code=400, detail="Valid phone number is required")
+
+    db = get_db()
+    shop = get_shop(db, shop_id)
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    assert_shop_access(user, shop)
+
+    cfg = _mpesa_cfg(shop)
+    if not _mpesa_cfg_complete(cfg):
+        raise HTTPException(
+            status_code=400,
+            detail="Save your consumer key, consumer secret, shortcode and passkey first.",
+        )
+
+    checkout_request_id, daraja_response = _stk_push(
+        cfg=cfg,
+        order_id=None,
+        amount=1,  # KES 1 — Daraja minimum for verification
+        phone=phone,
+    )
+
+    # Detect clearly-failed Daraja responses so we surface the error.
+    response_code = None
+    error_message = None
+    if isinstance(daraja_response, dict):
+        response_code = daraja_response.get("ResponseCode") or daraja_response.get("errorCode")
+        error_message = daraja_response.get("errorMessage") or daraja_response.get("ResponseDescription")
+
+    if daraja_response is None:
+        # Nothing returned → token/auth failed (usually wrong keys or env)
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Daraja did not accept the credentials. Double-check your consumer key, "
+                "consumer secret, shortcode, passkey and environment (sandbox vs production)."
+            ),
+        )
+    if response_code and str(response_code) not in {"0", "00000000"}:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Daraja error: {error_message or response_code}",
+        )
+
+    return {
+        "ok": True,
+        "reference": checkout_request_id,
+        "amount": 1,
+        "phone": phone,
+        "env": cfg["env"],
+        "message": "Test prompt sent. Check your phone — KES 1 only, enter PIN to verify keys.",
+    }
