@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ProductImage from "../components/ProductImage";
 
 /**
  * Dukayko landing page — minimalist, product-first, mobile-first.
@@ -61,13 +62,13 @@ export default function LandingPage() {
             <span style={dot("#ef4444")} />
             <span style={dot("#f59e0b")} />
             <span style={dot("#22c55e")} />
-            <div style={urlBar}>dukayko.com/shop/mama-mboga</div>
+            <div style={urlBar}>dukayko.com/shop/mkenya-shop</div>
           </div>
 
           <div style={shopBody}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <h3 style={{ margin: 0, color: "#0f172a", fontSize: 18 }}>
-                Mama Mboga Kitchen
+                Mkenya Shop
               </h3>
               <div style={{ color: "#475569", fontSize: 12, marginBottom: 12 }}>
                 📂 Groceries · 📍 Nairobi
@@ -85,8 +86,8 @@ export default function LandingPage() {
                 🛒 Cart&nbsp;(2)
               </div>
               <div style={{ fontSize: 13, color: "#334155", marginTop: 6 }}>
-                1 × Sugar 1kg · KES 100
-                <br />1 × Bread · KES 60
+                1 × Bread · KES 60
+                <br />1 × Blue Band · KES 180
               </div>
               <div
                 style={{
@@ -100,7 +101,7 @@ export default function LandingPage() {
                 }}
               >
                 <span>Total</span>
-                <span>KES 160</span>
+                <span>KES 240</span>
               </div>
               <div style={fakeMpesaBtn}>🟢 Pay with M-Pesa</div>
             </aside>
@@ -207,9 +208,7 @@ function DemoProductCard({ p }) {
   const [added, setAdded] = useState(false);
   return (
     <div style={productCard}>
-      <div style={{ ...productImg, background: p.bg }}>
-        <span style={{ fontSize: 32 }}>{p.emoji}</span>
-      </div>
+      <ProductImage src={p.image} alt={p.name} height={90} />
       <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 14, marginTop: 6 }}>
         {p.name}
       </div>
@@ -243,9 +242,24 @@ function DemoProductCard({ p }) {
 // Data
 // ============================================================
 const DEMO_PRODUCTS = [
-  { name: "Sugar 1kg", price: 100, emoji: "🧂", bg: "#fff7ed" },
-  { name: "Bread", price: 60, emoji: "🍞", bg: "#fef3c7" },
-  { name: "Milk 500ml", price: 70, emoji: "🥛", bg: "#eff6ff" },
+  {
+    name: "Bread",
+    price: 60,
+    image:
+      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/f9nb6m43_bread.webp",
+  },
+  {
+    name: "Milk 1L",
+    price: 90,
+    image:
+      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/ugn04rpi_milk.webp",
+  },
+  {
+    name: "Blue Band",
+    price: 180,
+    image:
+      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/rm5npbiy_blueband.webp",
+  },
 ];
 
 const STEPS = [
