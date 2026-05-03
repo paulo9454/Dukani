@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import API from "../api/client";
 import CheckoutModal from "../components/CheckoutModal";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../constants/categories";
+import ProductImage from "../components/ProductImage";
 
 /**
  * Public Shop Page — Shopify-style /shop/:slug
@@ -145,13 +146,13 @@ export default function PublicShopPage({ slug }) {
           />
         )}
         <div>
-          <h1 style={{ margin: 0 }}>{shop?.name}</h1>
+          <h1 style={{ margin: 0, color: "#0f172a" }}>{shop?.name}</h1>
           {shop?.description && (
-            <p style={{ margin: "6px 0 0", color: "#475569" }}>
+            <p style={{ margin: "6px 0 0", color: "#334155" }}>
               {shop.description}
             </p>
           )}
-          <div style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>
+          <div style={{ marginTop: 6, fontSize: 13, color: "#475569" }}>
             {shop?.category && <span>📂 {shop.category} · </span>}
             {shop?.address && <span>📍 {shop.address}</span>}
           </div>
@@ -197,7 +198,7 @@ export default function PublicShopPage({ slug }) {
         )}
 
         {visibleProducts.length === 0 ? (
-          <p style={{ color: "#64748b" }}>
+          <p style={{ color: "#475569" }}>
             {products.length === 0
               ? "This shop has no products yet."
               : "No products in this category yet."}
@@ -215,61 +216,35 @@ export default function PublicShopPage({ slug }) {
               <div
                 key={p._id}
                 data-testid={`public-product-${p._id}`}
+                className="dk-card"
                 style={cardStyle}
               >
-                {p.image ? (
-                  <img
-                    src={
-                      p.image?.startsWith("http")
-                        ? p.image
-                        : p.image?.startsWith("/static/")
-                        ? "/api" + p.image
-                        : p.image
-                    }
-                    alt={p.name}
-                    style={{
-                      width: "100%",
-                      height: 140,
-                      objectFit: "cover",
-                      borderRadius: 8,
-                      background: "#f1f5f9",
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      height: 140,
-                      background: "#f1f5f9",
-                      borderRadius: 8,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontSize: 30,
-                    }}
-                  >
-                    📦
-                  </div>
-                )}
-                <h3 style={{ margin: "10px 0 4px", fontSize: 15 }}>{p.name}</h3>
+                <ProductImage product={p} alt={p.name} height={140} />
+                <h3 style={{ margin: "10px 0 4px", fontSize: 15, color: "#0f172a" }}>
+                  {p.name}
+                </h3>
                 {p.category && (
-                  <small style={{ color: "#64748b" }}>
+                  <small style={{ color: "#475569" }}>
                     {categoryLabel(p.category)}
                   </small>
                 )}
-                <div style={{ color: "#16a34a", fontWeight: 700, marginTop: 4 }}>
+                <div style={{ color: "#15803d", fontWeight: 700, marginTop: 4 }}>
                   {formatKES(p.price)}
                 </div>
                 <button
                   onClick={() => addToCart(p)}
+                  data-testid={`public-add-to-cart-${p._id}`}
                   style={{
-                    marginTop: 8,
-                    padding: "8px 12px",
+                    marginTop: 10,
+                    padding: "10px 12px",
                     background: "#16a34a",
                     color: "white",
                     border: "none",
-                    borderRadius: 6,
+                    borderRadius: 8,
                     cursor: "pointer",
                     width: "100%",
+                    fontWeight: 700,
+                    minHeight: 44,
                   }}
                 >
                   Add to cart
@@ -395,13 +370,17 @@ const cartStyle = {
   position: "fixed",
   bottom: 16,
   right: 16,
-  width: 280,
+  left: 16,
+  maxWidth: 320,
+  marginLeft: "auto",
   background: "white",
   border: "1px solid #e2e8f0",
-  borderRadius: 10,
-  padding: 12,
-  boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+  borderRadius: 12,
+  padding: 14,
+  boxShadow: "0 8px 24px rgba(15,23,42,0.12)",
   fontSize: 13,
+  color: "#0f172a",
+  zIndex: 50,
 };
 
 const pillStyle = (active) => ({

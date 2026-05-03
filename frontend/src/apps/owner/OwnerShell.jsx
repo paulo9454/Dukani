@@ -154,10 +154,10 @@ function OwnerShell() {
                   borderRadius: 8,
                 }}
               >
-                <b>{a.type || "LOW_STOCK"}</b>
-                <div style={{ color: "#555" }}>{a.message || a.product_name}</div>
+                <b style={{ color: "#991b1b" }}>{a.type || "LOW_STOCK"}</b>
+                <div style={{ color: "#334155" }}>{a.message || a.product_name}</div>
                 {typeof a.stock !== "undefined" && (
-                  <div style={{ fontSize: 12 }}>
+                  <div style={{ fontSize: 12, color: "#475569" }}>
                     Shop: {a.shop_name || a.shop_id} | Stock: {a.stock} / threshold {a.threshold}
                   </div>
                 )}
@@ -171,9 +171,18 @@ function OwnerShell() {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
-      <div style={{ width: 240, background: "#0f172a", color: "white", padding: 18 }}>
-        <h3 style={{ marginTop: 0 }}>🏪 Owner Panel</h3>
+    <div style={{ display: "flex", minHeight: "calc(100vh - 58px)" }} className="dk-owner-shell">
+      <div
+        className="dk-owner-sidebar"
+        style={{
+          width: 240,
+          background: "#0f172a",
+          color: "white",
+          padding: 18,
+          flexShrink: 0,
+        }}
+      >
+        <h3 style={{ marginTop: 0, color: "#fff" }}>🏪 Owner Panel</h3>
         <Tab id="dashboard" label="📊 Dashboard" testid="tab-dashboard" />
         <Tab id="shops" label="🏪 Shops" testid="tab-shops" />
         <Tab id="shopkeepers" label="👥 Shopkeepers" testid="tab-shopkeepers" />
@@ -185,7 +194,7 @@ function OwnerShell() {
         <Tab id="alerts" label="🔴 Alerts" testid="tab-alerts" />
       </div>
 
-      <div style={{ flex: 1, padding: 20, background: "#f8fafc" }}>
+      <div className="dk-owner-content" style={{ flex: 1, padding: 20, background: "#f8fafc", minWidth: 0 }}>
         {renderContent()}
       </div>
 

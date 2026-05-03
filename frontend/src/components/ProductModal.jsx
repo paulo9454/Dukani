@@ -220,7 +220,7 @@ if (image) {
 />
 
 {/* PREVIEW */}
-{image && (
+{image ? (
   <img
     src={URL.createObjectURL(image)}
     alt="preview"
@@ -231,7 +231,19 @@ if (image) {
       borderRadius: 8
     }}
   />
-)}
+) : product?.image ? (
+  <img
+    src={product.image?.startsWith("http") ? product.image : (product.image?.startsWith("/static/") ? "/api" + product.image : product.image)}
+    alt="current"
+    style={{
+      width: "100%",
+      height: 100,
+      objectFit: "cover",
+      borderRadius: 8,
+      opacity: 0.9
+    }}
+  />
+) : null}
   {/* BUYING MODEL */}
   <select
     value={form.buying_unit}

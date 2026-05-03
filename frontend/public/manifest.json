@@ -1,0 +1,27 @@
+{
+  "name": "Dukayko — Sell. Track. Grow.",
+  "short_name": "Dukayko",
+  "description": "Run your shop, POS and online storefront from one app.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#16a34a",
+  "lang": "en",
+  "icons": [
+    {
+      "src": "/dukayko-logo.jpg",
+      "sizes": "192x192",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/dukayko-logo.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "shopping", "productivity"]
+}

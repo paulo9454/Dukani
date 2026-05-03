@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import API from "../../api/client";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
+import ProductImage from "../../components/ProductImage";
 import "../../receipt.css";
 
 function PosApp({ user, shopId }) {
@@ -324,20 +325,37 @@ useEffect(() => {
   }
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: "#f4f6f8" }}>
+    <div
+      className="dk-stack-mobile"
+      style={{ display: "flex", minHeight: "100vh", background: "#f8fafc" }}
+    >
       
     <div style={{
   flex: 3,
-  padding: 9,
+  padding: 12,
   overflowY: "auto",
   minWidth: 0   // ✅ THIS IS THE KEY FIX
 }}>
-        <h2>🧾 Cashier POS</h2>
-        <p>Shop: {activeShopId}</p>
+        <h2 style={{ color: "#0f172a" }}>🧾 Cashier POS</h2>
+        <p style={{ color: "#475569", fontSize: 13, marginTop: 0 }}>
+          Shop: {activeShopId}
+        </p>
 
-        <div style={{ marginBottom: 10 }}>
-          <button onClick={() => setPriceMode("retail")}>Retail</button>
-          <button onClick={() => setPriceMode("wholesale")}>Wholesale</button>
+        <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+          <button
+            onClick={() => setPriceMode("retail")}
+            data-variant={priceMode === "retail" ? "primary" : undefined}
+            data-testid="pos-price-mode-retail"
+          >
+            Retail
+          </button>
+          <button
+            onClick={() => setPriceMode("wholesale")}
+            data-variant={priceMode === "wholesale" ? "primary" : undefined}
+            data-testid="pos-price-mode-wholesale"
+          >
+            Wholesale
+          </button>
         </div>
 
         <input
@@ -409,78 +427,57 @@ useEffect(() => {
 
         <div style={{
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
   gap: 12
 }}>
   {filteredProducts.map((p, idx) => {
-    const img = getProductImage(p);   // ✅ ADD THIS LINE
-
     return (
     <div
       key={p._id}
+      className="dk-card"
+      data-testid={`pos-product-${p._id}`}
       style={{
         background: "#fff",
         borderRadius: 12,
         padding: 10,
-        boxShadow: "0 2px 6px rgba(0,0,0,0.06)",
+        boxShadow: "0 1px 2px rgba(15,23,42,0.06)",
+        border: "1px solid #e2e8f0",
         position: "relative",
       }}
     >
       {/* IMAGE */}
-     <div
-  style={{
-    height: 120,
-    borderRadius: 10,
-    overflow: "hidden",
-    marginBottom: 8,
-    background: "#f3f4f6",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center"
-  }}
->
-  {img ? (
-    <img
-      src={img}
-      alt={p.name}
-      style={{
-        width: "100%",
-        height: "100%",
-        objectFit: "cover"
-      }}
-    />
-  ) : (
-    <span style={{ fontSize: 12, color: "#999" }}>
-      No image
-    </span>
-  )}
-</div>
+      <ProductImage product={p} alt={p.name} height={120} />
+
       {/* NAME */}
-      <b style={{ display: "block" }}>{p.name}</b>
+      <b style={{ display: "block", marginTop: 8, color: "#0f172a" }}>
+        {p.name}
+      </b>
 
       {/* CATEGORY */}
-      <small style={{ color: "#777" }}>
+      <small style={{ color: "#475569" }}>
         {categoryLabel(p.category) || "Uncategorized"}
       </small>
 
       {/* PRICE */}
-      <div style={{ marginTop: 5, fontWeight: "bold" }}>
+      <div style={{ marginTop: 5, fontWeight: 700, color: "#0f172a" }}>
         KES {getPrice(p)}
       </div>
 
       {/* QUICK ADD BUTTON */}
       <button
         onClick={() => add(p)}
+        data-testid={`pos-add-${p._id}`}
         style={{
           marginTop: 8,
           width: "100%",
-          padding: 8,
+          padding: 10,
           background: "#16a34a",
           color: "#fff",
           border: "none",
           borderRadius: 8,
           cursor: "pointer",
-          fontWeight: "bold",
+          fontWeight: 700,
+          minHeight: 44,
         }}
       >
         + Add
@@ -491,12 +488,15 @@ useEffect(() => {
         </div>
       </div>
 
-      <div style={{
-        width: 340,
-        background: "#fff",
-        padding: 16,
-        borderLeft: "1px solid #ddd"
-      }}>
+      <div
+        className="dk-pos-cart"
+        style={{
+          width: 340,
+          background: "#fff",
+          padding: 16,
+          borderLeft: "1px solid #e2e8f0",
+        }}
+      >
         <h3>Cart</h3>
         <button
   onClick={() => setCreditFormOpen(true)}
@@ -522,12 +522,12 @@ useEffect(() => {
       justifyContent: "space-between",
       alignItems: "center",
       padding: "8px 0",
-      borderBottom: "1px solid #eee",
+      borderBottom: "1px solid #e2e8f0",
     }}
   >
     <div>
-      <b>{i.name}</b>
-      <div style={{ fontSize: 12, color: "#666" }}>
+      <b style={{ color: "#0f172a" }}>{i.name}</b>
+      <div style={{ fontSize: 12, color: "#475569" }}>
         {i.qty} × {i.price}
       </div>
     </div>

@@ -3,6 +3,7 @@ import { getProducts } from "../../api/products";
 
 import ProductModal from "../../components/ProductModal";
 import RestockModal from "../../components/RestockModal";
+import ProductImage from "../../components/ProductImage";
 import API from "../../api/client";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 
@@ -125,49 +126,61 @@ function ProductsPage({ shopId }) {
         .map((p) => (
         <div
           key={p._id}
+          className="dk-card"
+          data-testid={`inventory-product-${p._id}`}
           style={{
-            border: "1px solid #eee",
+            border: "1px solid #e2e8f0",
             padding: 12,
             marginTop: 10,
-            borderRadius: 6,
+            borderRadius: 10,
             background: "#fff",
+            display: "flex",
+            gap: 12,
+            alignItems: "flex-start",
+            boxShadow: "0 1px 2px rgba(15,23,42,0.05)",
           }}
         >
-          <b>{p.name}</b>
-
-          <div style={{ fontSize: 13 }}>
-            📂 {categoryLabel(p.category) || getCategoryName(p.category_id) || "Uncategorized"} | 📦 {p.stock} | 🧾 {p.unit_type}
+          <div style={{ flexShrink: 0, width: 84 }}>
+            <ProductImage product={p} alt={p.name} height={84} />
           </div>
 
-          <div style={{ marginTop: 4 }}>
-            💰 Buy: {p.buying_price} | Sell: {p.price}
-            {p.wholesale_price ? ` | Wholesale: ${p.wholesale_price}` : ""}
-          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <b style={{ color: "#0f172a" }}>{p.name}</b>
 
-          <div style={{ color: "green", fontWeight: "bold" }}>
-            Profit: KES {getProfit(p)}
-          </div>
+            <div style={{ fontSize: 13, color: "#334155", marginTop: 2 }}>
+              📂 {categoryLabel(p.category) || getCategoryName(p.category_id) || "Uncategorized"} | 📦 {p.stock} | 🧾 {p.unit_type}
+            </div>
 
-          {/* =========================
-              ACTIONS
-          ========================= */}
-          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-            
-            <button
-              onClick={() => {
-                setEditProduct(p);
-                setShowModal(true);
-              }}
-            >
-              ✏ Edit
-            </button>
+            <div style={{ marginTop: 4, color: "#0f172a" }}>
+              💰 Buy: {p.buying_price} | Sell: {p.price}
+              {p.wholesale_price ? ` | Wholesale: ${p.wholesale_price}` : ""}
+            </div>
 
-            <button
-              onClick={() => setRestockProductItem(p)}
-            >
-              📦 Restock
-            </button>
+            <div style={{ color: "#15803d", fontWeight: 700 }}>
+              Profit: KES {getProfit(p)}
+            </div>
 
+            {/* =========================
+                ACTIONS
+            ========================= */}
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                data-testid={`inventory-edit-${p._id}`}
+                onClick={() => {
+                  setEditProduct(p);
+                  setShowModal(true);
+                }}
+              >
+                ✏ Edit
+              </button>
+
+              <button
+                data-testid={`inventory-restock-${p._id}`}
+                onClick={() => setRestockProductItem(p)}
+              >
+                📦 Restock
+              </button>
+            </div>
           </div>
         </div>
       ))}

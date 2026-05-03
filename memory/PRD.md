@@ -73,3 +73,42 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
 - Verified: `https://.../api/static/products/<file>` returns 200 through the
   Kubernetes ingress. `/shop/gomba1` renders both product images. No flash on
   login → owner dashboard transition.
+
+## Session: Feb 2026 — Categories fix + checkout readiness
+- POS/public-shop were filtering by `product.category_id` (empty) instead of
+  `product.category` (slug saved by ProductModal). Replaced the dynamic bar
+  with slug-based `DEFAULT_CATEGORIES`, showing only categories that have ≥1
+  product, with filter + label on each card in POS and `/shop/{slug}`.
+- Cleaned up dead nested `createCreditor` inside `PosApp.checkout`.
+- Confirmed checkout readiness: cash/credit work without external keys; M-Pesa
+  STK push and Paystack initialize use `backend/.env` keys (currently empty).
+
+## Session: Feb 2026 — 404 dead-end fix + deploy guard
+- Settings `load_dotenv(override=False)` confirmed to keep deploy `MONGO_URL`.
+- Replaced dead-end 404 in `App.jsx` with auto-redirect to the user's dashboard
+  (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
+  the login screen regardless of path.
+
+## Session: Feb 2026 — UI reliability, contrast, mobile-first, PWA
+- Added `utils/imageUrl.js` — single resolver handling http/https, legacy
+  `/static/*`, current `/api/static/*`, and relative paths. Uses
+  `VITE_BACKEND_URL` on production builds.
+- Added `components/ProductImage.jsx` — cached-aware image with shimmer
+  skeleton, `onError` fallback ("No image"), `loading="lazy"` + async decode,
+  150ms fade-in on load. Used in POS, public shop and inventory.
+- Rewrote `index.css` — removed Vite template leftovers (1126px lock,
+  centered text, dark mode bleed). New tokens give WCAG-AA contrast:
+  `--dk-text #0f172a` (primary), `--dk-text-muted #475569` (secondary),
+  `--dk-text-subtle #334155`. Locked to light mode (`color-scheme: light`).
+- Mobile-first responsive rules: `.dk-stack-mobile`, `.dk-pos-cart` → full
+  width on phones; `.dk-owner-sidebar` collapses to horizontal scroll bar
+  under 768px. Thumb-friendly 44–46px button minimums.
+- Updated `PosApp.jsx`, `PublicShopPage.jsx`, `ProductsPage.jsx` (inventory),
+  `ProductModal.jsx`, `OwnerShell.jsx`, `App.jsx` — replaced faint grays
+  (#777, #999, #666) with readable ones, added test IDs, wired ProductImage.
+- PWA: created `public/manifest.json` (standalone, portrait, brand green
+  theme), linked it in `index.html` along with `apple-mobile-web-app-*` and
+  `viewport-fit=cover` for notch-safe rendering.
+- Verified: images load on all three surfaces (public shop, POS, inventory);
+  broken URLs correctly fall back to "No image"; category bar works on 390px
+  mobile and 1440px desktop; manifest + theme-color reachable.

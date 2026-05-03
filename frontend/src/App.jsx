@@ -177,16 +177,32 @@ function App() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-        <span style={{ fontSize: 13, color: "#64748b" }}>{user.role}</span>
+        <span
+          data-testid="header-role"
+          style={{
+            fontSize: 12,
+            color: "#334155",
+            background: "#f1f5f9",
+            padding: "4px 10px",
+            borderRadius: 999,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+          }}
+        >
+          {user.role}
+        </span>
         <button
           data-testid="logout-btn"
           onClick={handleLogout}
           style={{
-            padding: "6px 12px",
+            padding: "8px 14px",
             border: "1px solid #e2e8f0",
             background: "white",
-            borderRadius: 6,
+            borderRadius: 8,
             cursor: "pointer",
+            color: "#0f172a",
+            fontWeight: 600,
           }}
         >
           Logout

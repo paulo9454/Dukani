@@ -1,111 +1,210 @@
+/* ==========================================================================
+   Dukayko — base styles
+   Mobile-first, WCAG-friendly contrast, locked to light mode so shop owners
+   on cheap Android phones get the same experience as desktop users.
+   ========================================================================== */
+
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #fff;
-  --border: #e5e4e7;
-  --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
-  --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  /* Brand */
+  --dk-primary: #16a34a;        /* brand green */
+  --dk-primary-600: #15803d;
+  --dk-primary-50: #dcfce7;
 
-  --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --heading: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, Consolas, monospace;
+  /* Surfaces */
+  --dk-bg: #f8fafc;
+  --dk-surface: #ffffff;
+  --dk-border: #e2e8f0;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
-  color-scheme: light dark;
-  color: var(--text);
-  background: var(--bg);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  /* Text — all pass WCAG AA on white */
+  --dk-text: #0f172a;           /* primary ≥ 13.4:1 */
+  --dk-text-muted: #475569;     /* secondary ≥ 7.0:1 */
+  --dk-text-subtle: #334155;    /* tertiary/labels ≥ 9.5:1 */
+  --dk-text-disabled: #94a3b8;  /* never used for important info */
+
+  --dk-danger: #dc2626;
+  --dk-warning: #d97706;
+
+  --dk-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --dk-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+
+  --dk-radius: 10px;
+  --dk-radius-lg: 14px;
+
+  color-scheme: light;          /* opt out of browser dark overrides */
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--dk-text);
+  background: var(--dk-bg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  @media (max-width: 1024px) {
-    font-size: 16px;
-  }
+  text-rendering: optimizeLegibility;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #9ca3af;
-    --text-h: #f3f4f6;
-    --bg: #16171d;
-    --border: #2e303a;
-    --code-bg: #1f2028;
-    --accent: #c084fc;
-    --accent-bg: rgba(192, 132, 252, 0.15);
-    --accent-border: rgba(192, 132, 252, 0.5);
-    --social-bg: rgba(47, 48, 58, 0.5);
-    --shadow:
-      rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
-  }
-
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-}
-
-body {
-  margin: 0;
-}
-
-#root {
-  width: 1126px;
-  max-width: 100%;
-  margin: 0 auto;
-  text-align: center;
-  border-inline: 1px solid var(--border);
-  min-height: 100svh;
-  display: flex;
-  flex-direction: column;
+* {
   box-sizing: border-box;
 }
 
-h1,
-h2 {
-  font-family: var(--heading);
-  font-weight: 500;
-  color: var(--text-h);
-}
-
-h1 {
-  font-size: 56px;
-  letter-spacing: -1.68px;
-  margin: 32px 0;
-  @media (max-width: 1024px) {
-    font-size: 36px;
-    margin: 20px 0;
-  }
-}
-h2 {
-  font-size: 24px;
-  line-height: 118%;
-  letter-spacing: -0.24px;
-  margin: 0 0 8px;
-  @media (max-width: 1024px) {
-    font-size: 20px;
-  }
-}
-p {
+html,
+body,
+#root {
   margin: 0;
+  padding: 0;
+  min-height: 100svh;
+  width: 100%;
+  background: var(--dk-bg);
+  color: var(--dk-text);
 }
 
-code,
-.counter {
-  font-family: var(--mono);
-  display: inline-flex;
-  border-radius: 4px;
-  color: var(--text-h);
+/* Headings pop on white — no lost contrast */
+h1, h2, h3, h4 {
+  color: var(--dk-text);
+  font-weight: 700;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
 }
+h1 { font-size: clamp(22px, 4vw, 32px); }
+h2 { font-size: clamp(18px, 3vw, 22px); }
+h3 { font-size: 16px; }
 
-code {
+p, li, span, label, small { color: inherit; }
+small { font-size: 12.5px; color: var(--dk-text-muted); }
+
+/* Inputs & buttons — readable, thumb-sized on mobile */
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
   font-size: 15px;
-  line-height: 135%;
-  padding: 4px 8px;
-  background: var(--code-bg);
+  color: var(--dk-text);
+}
+
+input,
+select,
+textarea {
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--dk-border);
+  border-radius: 8px;
+  background: var(--dk-surface);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+  width: 100%;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--dk-primary);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--dk-text-muted);
+  opacity: 1;
+}
+
+button {
+  min-height: 42px;
+  padding: 10px 14px;
+  border: 1px solid var(--dk-border);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--dk-text);
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 120ms ease, border-color 120ms ease,
+    transform 60ms ease;
+}
+button:hover:not(:disabled) { background: #f1f5f9; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Keep primary CTAs obvious */
+button[data-variant="primary"],
+.dk-btn-primary {
+  background: var(--dk-primary);
+  border-color: var(--dk-primary);
+  color: #fff;
+}
+button[data-variant="primary"]:hover:not(:disabled),
+.dk-btn-primary:hover:not(:disabled) {
+  background: var(--dk-primary-600);
+  border-color: var(--dk-primary-600);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Shimmer for image skeletons */
+@keyframes dukayko-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Reset any stray template-era text-align:center that was making mobile
+   text look like broken marketing copy. */
+#root { text-align: left; }
+
+/* ==========================================================================
+   Responsive helpers used across pages (opt-in class names)
+   ========================================================================== */
+
+/* Stack any row of columns on phones */
+@media (max-width: 768px) {
+  .dk-stack-mobile { flex-direction: column !important; }
+  .dk-stack-mobile > * { width: 100% !important; }
+
+  /* POS cart sidebar becomes a full-width bottom sheet */
+  .dk-pos-cart {
+    width: 100% !important;
+    border-left: none !important;
+    border-top: 1px solid var(--dk-border);
+  }
+
+  /* Cards default to full width with sensible min height */
+  .dk-card { padding: 12px !important; }
+
+  /* Buttons — thumb-friendly */
+  button { min-height: 46px; }
+}
+
+/* Keep desktop layout from feeling empty on ultra-wide screens */
+.dk-page {
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Safe-area padding for iOS notch / Android gesture bar (PWA) */
+@supports (padding: max(0px)) {
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+}
+
+/* ==========================================================================
+   Owner Shell — sidebar collapses to top strip on phones
+   ========================================================================== */
+@media (max-width: 768px) {
+  .dk-owner-shell { flex-direction: column !important; }
+  .dk-owner-sidebar {
+    width: 100% !important;
+    padding: 10px 12px !important;
+    overflow-x: auto;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+  }
+  .dk-owner-sidebar h3 { display: none; }
+  .dk-owner-sidebar > div {
+    margin-bottom: 0 !important;
+    flex-shrink: 0;
+  }
+  .dk-owner-content { padding: 14px !important; }
 }
