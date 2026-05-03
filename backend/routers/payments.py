@@ -201,6 +201,10 @@ def paystack_initialize(
             if resp.status_code >= 400 or not data.get("status"):
                 logger.error("paystack init failed: %s", data)
             authorization_url = (data.get("data") or {}).get("authorization_url")
+            logger.info(
+                "paystack init ok reference=%s shop_id=%s plan=%s amount=%s",
+                reference, shop_id, subscription_plan, record["amount"],
+            )
         except Exception as exc:
             logger.exception("paystack init exception: %s", exc)
 
@@ -373,6 +377,7 @@ async def paystack_webhook(
     event = payload.get("event")
     data = payload.get("data") or {}
     reference = data.get("reference")
+    logger.info("paystack webhook received event=%s reference=%s", event, reference)
     if not reference:
         return {"ok": True}
 

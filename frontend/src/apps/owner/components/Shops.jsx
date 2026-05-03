@@ -3,6 +3,7 @@ import API from "../../../api/client";
 import MPesaSettingsModal from "../../../components/MPesaSettingsModal";
 import { shareOnWhatsApp, copyShopLink } from "../../../utils/share";
 import { toast } from "../../../utils/toast";
+import { redirectTop } from "../../../utils/navigate";
 
 function Shops({ search = "" }) {
   const [shops, setShops] = useState([]);
@@ -212,7 +213,7 @@ function Shops({ search = "" }) {
               try {
                 const res = await API.post(`/api/owner/shops/${shop._id}/subscribe`, {
                   plan: "pos_online",
-                  callback_url: `${window.location.origin}/owner?sub=verify`,
+                  callback_url: `${window.location.origin}/payment-success`,
                 });
                 if (res.data?.activated) {
                   await loadShops();
@@ -222,7 +223,7 @@ function Shops({ search = "" }) {
                 const url = res.data?.authorization_url;
                 if (url) {
                   toast("Redirecting to Paystack…");
-                  window.location.href = url;
+                  redirectTop(url);
                 } else {
                   toast("Could not start payment — please try again.");
                 }

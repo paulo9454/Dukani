@@ -7,6 +7,7 @@ import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
 import OrderTrack from "./pages/OrderTrack";
 import LandingPage from "./pages/LandingPage";
+import PaymentSuccess from "./pages/PaymentSuccess";
 import InstallButton from "./components/InstallButton";
 import PlanBadge from "./components/PlanBadge";
 
@@ -133,6 +134,13 @@ function App() {
   if (path.startsWith("/shop/")) {
     const slug = path.replace(/^\/shop\//, "").replace(/\/+$/, "");
     return <PublicShopPage slug={slug} />;
+  }
+
+  // =========================
+  // PUBLIC ROUTE — /payment-success (Paystack callback landing)
+  // =========================
+  if (path === "/payment-success") {
+    return <PaymentSuccess />;
   }
 
   // =========================

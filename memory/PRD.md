@@ -89,6 +89,30 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Paystack iframe fix + /payment-success route
+- **Root cause of "checkout.paystack.com refused to connect"**: the preview
+  renders the app in an iframe, and `window.location.href = paystack_url`
+  tried to navigate the iframe. Paystack sends `X-Frame-Options: DENY` so
+  the iframe refuses. Fixed with `utils/navigate.js::redirectTop()` which
+  uses `window.top.location` or `window.open(url, "_top")` to break out of
+  the frame. Used everywhere we kick off Paystack (`Shops.jsx`, `PlanBadge`).
+- **New public route `/payment-success`**: Paystack-safe landing page,
+  UI-only, calls `/paystack/verify` as a hint but activation is STILL
+  webhook-owned. Shows Confirming / Success / No-reference states with a
+  Continue button that goes back to `/owner` (or `/` if signed out).
+- **Subscribe callback_url now points to `/payment-success`** instead of
+  `/owner?sub=verify`.
+- **Audit**: confirmed NO `/api/payments/callback` endpoint exists in code
+  — the dashboard URL that was set to that is a Paystack dashboard config
+  issue. Correct URLs documented:
+  - Webhook: `https://<domain>/api/payments/paystack/webhook`
+  - Callback: `https://<domain>/payment-success`
+- **Logging added**: `logger.info` on initialize success (reference + shop +
+  plan + amount), webhook receive (event + reference), and the existing
+  `subscription activated shop=… plan=… reference=…`.
+- Verified: `/payment-success?reference=…` renders 200, reference echoed,
+  Continue button present; webhook still 401s unsigned.
+
 ## Session: Feb 2026 — "Your plan" header badge
 - New `components/PlanBadge.jsx` wired into the owner/admin header.
 - Reads `/api/owner/shops`, picks the most-urgent shop (expired → <7d →

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import API from "../api/client";
 import { toast } from "../utils/toast";
+import { redirectTop } from "../utils/navigate";
 
 /**
  * PlanBadge — compact "Your plan" chip for the owner header.
@@ -135,14 +136,14 @@ export default function PlanBadge({ testId = "plan-badge" }) {
       const targetPlan = plan || "pos_online";
       const res = await API.post(`/api/owner/shops/${shop._id}/subscribe`, {
         plan: targetPlan,
-        callback_url: `${window.location.origin}/owner?sub=verify`,
+        callback_url: `${window.location.origin}/payment-success`,
       });
       if (res.data?.activated) {
         toast("✅ Plan activated", { variant: "success" });
         setTimeout(() => window.location.reload(), 800);
       } else if (res.data?.authorization_url) {
         toast("Redirecting to Paystack…");
-        window.location.href = res.data.authorization_url;
+        redirectTop(res.data.authorization_url);
       } else {
         toast("Could not start payment — try again.");
       }
