@@ -1,5 +1,6 @@
 import { useState } from "react";
 import ProductImage from "../components/ProductImage";
+import InstallButton from "../components/InstallButton";
 
 /**
  * Dukayko landing page — minimalist, product-first, mobile-first.
@@ -27,13 +28,16 @@ export default function LandingPage() {
           />
           <b style={{ color: "#0f172a", letterSpacing: -0.2 }}>Dukayko</b>
         </div>
-        <button
-          onClick={signIn}
-          data-testid="landing-signin"
-          style={ghostBtn}
-        >
-          Sign in
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <InstallButton testId="landing-install-btn" />
+          <button
+            onClick={signIn}
+            data-testid="landing-signin"
+            style={ghostBtn}
+          >
+            Sign in
+          </button>
+        </div>
       </header>
 
       {/* ═══ 1. Hero ═══ */}

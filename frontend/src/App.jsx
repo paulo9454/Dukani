@@ -7,6 +7,7 @@ import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
 import OrderTrack from "./pages/OrderTrack";
 import LandingPage from "./pages/LandingPage";
+import InstallButton from "./components/InstallButton";
 
 import OwnerShell from "./apps/owner/OwnerShell";
 import ShopkeeperHome from "./apps/Shopkeeper/ShopkeeperHome";
@@ -195,6 +196,7 @@ function App() {
       </div>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <InstallButton testId="owner-install-btn" />
         <span
           data-testid="header-role"
           style={{

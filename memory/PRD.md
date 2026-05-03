@@ -89,6 +89,28 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — PWA install + Paystack production readiness audit
+- New `public/sw.js` — minimal service worker (shell cache + SWR for
+  `/api/static/*`), registered from `utils/pwa.js` on window load. Satisfies
+  Chrome's installability criteria (manifest + fetch-handling SW).
+- New `utils/pwa.js` — captures `beforeinstallprompt`, exposes
+  `promptInstall()`, `isStandalone()`, `isIos()`, and emits
+  `dukayko:install-available` / `…-cleared` CustomEvents.
+- New `components/InstallButton.jsx` — hides when standalone, shows native
+  prompt on Android/Chrome, shows iOS "Share → Add to Home Screen" tooltip
+  on iOS Safari. Placed in Landing header + Owner header.
+- Paystack production audit: **LIVE keys loaded and endpoints working**.
+  `POST /paystack/initialize` returns a real `pk_live_` public key and a
+  reachable `https://checkout.paystack.com/<ref>` URL. Webhook enforces
+  HMAC-SHA512 (unsigned → 401). Verify endpoint hits
+  `https://api.paystack.co/transaction/verify/{ref}`. Idempotent via
+  `_idempotent_settle`. Keys survive `.env` being empty because
+  `load_dotenv(override=False)` preserves Emergent-protected env vars.
+- **Gap flagged (not fixed):** `/paystack/webhook` does not flip shop
+  `subscription_plan` on success — `/api/owner/shops/{id}/subscribe` still
+  activates plans without payment. Needs webhook metadata hook +
+  payment-gated subscribe endpoint (documented for next session).
+
 ## Session: Feb 2026 — One-tap WhatsApp sharing
 - New `utils/share.js` — `shareOnWhatsApp(slug)` opens `wa.me/?text=...` in a
   new tab with the exact template: "Check out my shop 🛒\n{url}\n\nOrder
