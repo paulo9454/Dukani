@@ -89,6 +89,17 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — "Your plan" header badge
+- New `components/PlanBadge.jsx` wired into the owner/admin header.
+- Reads `/api/owner/shops`, picks the most-urgent shop (expired → <7d →
+  <14d → healthy → none) and renders a color-coded chip plus a one-tap
+  Activate/Renew button that hits `/api/owner/shops/{id}/subscribe` and
+  redirects to Paystack.
+- Palette: green (healthy) · amber (<=14d) · red (<=7d or expired) · gray
+  (no plan). Hidden entirely when the owner has zero shops.
+- Verified live: chip + Activate button render in header for an owner
+  with no active plan; lint clean.
+
 ## Session: Feb 2026 — Paystack subscription activation wired end-to-end
 - **Free activation removed**: `/api/owner/shops/{id}/subscribe` no longer
   flips `subscription_plan`. It now builds a Paystack init with metadata
