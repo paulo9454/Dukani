@@ -210,14 +210,21 @@ function Shops({ search = "" }) {
 
             const upgradeOnline = async () => {
               try {
-                await API.post(`/api/owner/shops/${shop._id}/subscribe`, {
+                const res = await API.post(`/api/owner/shops/${shop._id}/subscribe`, {
                   plan: "pos_online",
+                  callback_url: `${window.location.origin}/owner?sub=verify`,
                 });
-                await loadShops();
-                if (shop.slug) {
-                  toast("✅ Online store activated — tap Share on WhatsApp to invite customers.", { variant: "success", duration: 3200 });
+                if (res.data?.activated) {
+                  await loadShops();
+                  toast("✅ Online store activated.", { variant: "success" });
+                  return;
+                }
+                const url = res.data?.authorization_url;
+                if (url) {
+                  toast("Redirecting to Paystack…");
+                  window.location.href = url;
                 } else {
-                  toast("✅ Online store activated!", { variant: "success" });
+                  toast("Could not start payment — please try again.");
                 }
               } catch (err) {
                 toast(err?.response?.data?.detail || "Failed to subscribe");

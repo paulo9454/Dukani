@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
+import os
 import uuid
 from datetime import datetime, timedelta
 
@@ -81,26 +82,90 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
     return {"message": "Shop created with 14-day POS trial", "shop": _normalize_id(shop_doc)}
 
 
+SUBSCRIPTION_PRICES_KES = {
+    "pos": 500,
+    "pos_online": 1000,
+}
+
+
 @router.post("/shops/{shop_id}/subscribe")
-def subscribe_shop(shop_id: str, payload: dict = Body(...), user=Depends(require_roles("owner", "admin"))):
+def subscribe_shop(
+    shop_id: str,
+    payload: dict = Body(...),
+    user=Depends(require_roles("owner", "admin")),
+):
+    """Start a Paystack checkout for a subscription plan.
+
+    Activation NEVER happens here — it's driven exclusively by the
+    verified Paystack webhook/verify flow which flips the shop's plan
+    only after `charge.success`. This endpoint returns the
+    authorization_url the client should redirect to.
+    """
+    from backend.routers.payments import paystack_initialize
+
     db = get_db()
     plan = payload.get("plan")
     if plan not in {"pos", "pos_online"}:
         raise HTTPException(status_code=400, detail="Invalid plan")
 
-    if user["role"] != "admin":
-        shop = db.shops.find_one({"_id": shop_id, "owner_id": user["_id"]})
-        if not shop:
-            raise HTTPException(status_code=403, detail="Not allowed")
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    if user["role"] != "admin" and shop.get("owner_id") != user["_id"]:
+        raise HTTPException(status_code=403, detail="Not allowed")
 
-    db.subscriptions.update_one({"shop_id": shop_id}, {"$set": {"plan": plan, "is_paid": True, "status": "active"}})
-    # Activate online store if plan includes it
-    online = plan == "pos_online"
-    db.shops.update_one(
-        {"_id": shop_id},
-        {"$set": {"subscription_plan": plan, "online_enabled": online, "is_online_enabled": online}},
+    # Admin override — admins can set plans without payment (internal tool).
+    if user["role"] == "admin" and payload.get("admin_override") is True:
+        online = plan == "pos_online"
+        db.shops.update_one(
+            {"_id": shop_id},
+            {"$set": {
+                "subscription_plan": plan,
+                "online_enabled": online,
+                "is_online_enabled": online,
+                "subscription_status": "active",
+            }},
+        )
+        db.subscriptions.update_one(
+            {"shop_id": shop_id},
+            {"$set": {"plan": plan, "is_paid": True, "status": "active"}},
+            upsert=True,
+        )
+        return {"activated": True, "plan": plan, "online_enabled": online, "admin_override": True}
+
+    email = user.get("email") or shop.get("contact_email")
+    if not email:
+        raise HTTPException(status_code=400, detail="Owner email is required for payment")
+
+    amount = SUBSCRIPTION_PRICES_KES.get(plan)
+    base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
+    callback_url = payload.get("callback_url") or (
+        f"{base_url}/owner?sub=verify" if base_url else None
     )
-    return {"message": f"Subscribed to {plan}", "online_enabled": online}
+
+    init = paystack_initialize(
+        payload={
+            "email": email,
+            "amount": amount,
+            "currency": payload.get("currency", "KES"),
+            "shop_id": shop_id,
+            "subscription_plan": plan,
+            "payment_type": "subscription",
+            "callback_url": callback_url,
+        },
+        user=user,
+    )
+
+    return {
+        "activated": False,
+        "plan": plan,
+        "amount": amount,
+        "currency": "KES",
+        "authorization_url": init.get("authorization_url"),
+        "reference": init.get("reference"),
+        "public_key": init.get("public_key"),
+        "message": "Complete payment to activate this plan.",
+    }
 
 
 @router.delete("/shops/{shop_id}")

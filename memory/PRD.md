@@ -89,6 +89,43 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Paystack subscription activation wired end-to-end
+- **Free activation removed**: `/api/owner/shops/{id}/subscribe` no longer
+  flips `subscription_plan`. It now builds a Paystack init with metadata
+  `{shop_id, subscription_plan, payment_type: "subscription", user_id}` and
+  returns `authorization_url` + reference. Admins can still override with
+  `admin_override: true` for internal use.
+- **Pricing**: `SUBSCRIPTION_PRICES_KES = {pos: 500, pos_online: 1000}` in
+  `owner.py`. Currency locked to KES. Amount converted to kobo by the
+  Paystack initialize helper.
+- **`_activate_subscription()`** helper in `payments.py`: idempotent flip of
+  `subscription_plan`, `online_enabled`, `is_online_enabled`,
+  `subscription_status="active"`, `subscription_start`, `subscription_end`
+  (30-day), `subscription_last_reference`. Also upserts `subscriptions`
+  collection. Tagged with `subscription_activated_at` on the payment doc
+  so replay never re-activates.
+- **Webhook** (`POST /paystack/webhook`): after HMAC-SHA512 verify +
+  idempotent settle, reads `data.metadata`, backfills the payment record
+  with any fields it didn't have (shop_id / plan / type) and calls
+  `_activate_subscription` on success. Failure events leave the shop
+  unchanged.
+- **Verify** (`POST /paystack/verify`): also calls `_activate_subscription`
+  so a customer returning from Paystack gets instant activation even if
+  the webhook is slow/offline. Response now carries
+  `subscription_activated: bool`.
+- **Frontend**:
+  - `Shops.jsx` "Activate Online Store" button now calls the new
+    subscribe endpoint and redirects to `authorization_url`.
+  - `App.jsx` one-shot `?reference=…` handler auto-calls
+    `/paystack/verify` on return from Paystack, toasts success, refreshes.
+- **Verified live** (via raw `PAYSTACK_SECRET_KEY` HMAC signed requests):
+  - subscribe → `activated:false` + Paystack URL, shop untouched ✓
+  - signed `charge.success` webhook → shop activated (30-day window) ✓
+  - replay same reference → `idempotent:true`, no double activation ✓
+  - signed `charge.failed` webhook → shop untouched ✓
+  - unsigned webhook → `401` ✓
+  - verify with fake reference → Paystack says failed → no activation ✓
+
 ## Session: Feb 2026 — PWA install + Paystack production readiness audit
 - New `public/sw.js` — minimal service worker (shell cache + SWR for
   `/api/static/*`), registered from `utils/pwa.js` on window load. Satisfies

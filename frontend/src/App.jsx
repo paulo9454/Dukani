@@ -91,6 +91,42 @@ function App() {
   }, [token, user, path]);
 
   // =========================
+  // PAYSTACK RETURN — auto-verify if the URL carries ?reference=...
+  // Catches the case where the customer reaches us before the webhook fires.
+  // =========================
+  useEffect(() => {
+    if (!token) return;
+    const reference = urlParams.get("reference") || urlParams.get("trxref");
+    if (!reference) return;
+    // Strip query params so a refresh doesn't re-verify.
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, "", cleanUrl);
+    API.post(`/api/payments/paystack/verify`, { reference })
+      .then((r) => {
+        if (r.data?.verified && r.data?.subscription_activated) {
+          import("./utils/toast").then(({ toast }) =>
+            toast("✅ Subscription activated.", { variant: "success", duration: 3200 })
+          );
+          // Force a page refresh so cached shop data updates.
+          setTimeout(() => window.location.reload(), 1200);
+        } else if (r.data?.verified) {
+          import("./utils/toast").then(({ toast }) =>
+            toast("Payment received. Updating your shop…", { variant: "success" })
+          );
+        } else {
+          import("./utils/toast").then(({ toast }) =>
+            toast("Payment was not completed. You can try again.")
+          );
+        }
+      })
+      .catch(() => {
+        import("./utils/toast").then(({ toast }) =>
+          toast("Could not verify the payment automatically.")
+        );
+      });
+  }, [token]);
+
+  // =========================
   // PUBLIC ROUTE — /shop/:slug (no auth required)
   // =========================
   if (path.startsWith("/shop/")) {

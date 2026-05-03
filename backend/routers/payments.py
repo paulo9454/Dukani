@@ -25,7 +25,7 @@ import hmac
 import hashlib
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Body, Request, Header
@@ -132,6 +132,9 @@ def paystack_initialize(
     email = payload.get("email")
     order_id = payload.get("order_id")
     shop_id = payload.get("shop_id")
+    # Optional subscription metadata — set by /owner/shops/{id}/subscribe
+    subscription_plan = payload.get("subscription_plan")
+    payment_type = payload.get("payment_type") or ("subscription" if subscription_plan else "order")
 
     if not email:
         raise HTTPException(status_code=400, detail="email is required")
@@ -145,6 +148,15 @@ def paystack_initialize(
         raise HTTPException(status_code=400, detail="amount or order_id is required")
 
     reference = f"PSK-{uuid.uuid4().hex[:14]}"
+    metadata = {
+        "order_id": order_id,
+        "shop_id": shop_id,
+        "payment_type": payment_type,
+    }
+    if subscription_plan:
+        metadata["subscription_plan"] = subscription_plan
+        metadata["user_id"] = user["_id"] if user else None
+
     record = {
         "_id": str(uuid.uuid4()),
         "reference": reference,
@@ -157,6 +169,8 @@ def paystack_initialize(
         "email": email,
         "status": "pending",
         "created_at": _now_iso(),
+        "payment_type": payment_type,
+        "subscription_plan": subscription_plan,
     }
     _persist_payment(record)
     if order_id:
@@ -178,7 +192,8 @@ def paystack_initialize(
                     "email": email,
                     "currency": record["currency"],
                     "reference": reference,
-                    "metadata": {"order_id": order_id, "shop_id": shop_id},
+                    "metadata": metadata,
+                    "callback_url": payload.get("callback_url"),
                 },
                 timeout=15,
             )
@@ -199,6 +214,69 @@ def paystack_initialize(
         "authorization_url": authorization_url,
         "provider": "paystack",
     }
+
+
+def _activate_subscription(payment: dict) -> bool:
+    """Flip a shop's subscription state after a verified Paystack payment.
+
+    Called from BOTH the webhook and the return-to-site verify endpoint so
+    activation is resilient to webhook delivery issues. Idempotent — only
+    activates once per payment record.
+    """
+    if not payment:
+        return False
+    if payment.get("status") != "success":
+        return False
+    if payment.get("subscription_activated_at"):
+        return False  # already activated
+    plan = payment.get("subscription_plan")
+    shop_id = payment.get("shop_id")
+    if not plan or not shop_id:
+        return False
+    if plan not in {"pos", "pos_online"}:
+        logger.warning("refusing to activate unknown plan: %s", plan)
+        return False
+
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    end = now + timedelta(days=30)
+    online = plan == "pos_online"
+
+    db.shops.update_one(
+        {"_id": shop_id},
+        {"$set": {
+            "subscription_plan": plan,
+            "subscription_status": "active",
+            "online_enabled": online,
+            "is_online_enabled": online,
+            "subscription_start": now.isoformat(),
+            "subscription_end": end.isoformat(),
+            "subscription_last_reference": payment.get("reference"),
+        }},
+    )
+    db.subscriptions.update_one(
+        {"shop_id": shop_id},
+        {"$set": {
+            "shop_id": shop_id,
+            "plan": plan,
+            "status": "active",
+            "is_paid": True,
+            "payment_reference": payment.get("reference"),
+            "start": now.isoformat(),
+            "end": end.isoformat(),
+            "updated_at": now.isoformat(),
+        }},
+        upsert=True,
+    )
+    db.payments.update_one(
+        {"reference": payment.get("reference")},
+        {"$set": {"subscription_activated_at": now.isoformat()}},
+    )
+    logger.info(
+        "subscription activated shop=%s plan=%s reference=%s",
+        shop_id, plan, payment.get("reference"),
+    )
+    return True
 
 
 @router.get("/paystack/verify")
@@ -255,6 +333,12 @@ def paystack_verify(
     )
     _mark_order_payment((record or {}).get("order_id"), status, "card", "paystack")
 
+    # Subscription activation — safe to call even if payment is not a sub.
+    activated = False
+    if status == "success":
+        fresh = db.payments.find_one({"reference": ref})
+        activated = _activate_subscription(fresh)
+
     return {
         "verified": status == "success",
         "status": status,
@@ -263,6 +347,7 @@ def paystack_verify(
         "order_id": (record or {}).get("order_id"),
         "amount": (record or {}).get("amount"),
         "idempotent": False,
+        "subscription_activated": activated,
     }
 
 
@@ -307,8 +392,28 @@ async def paystack_webhook(
         }},
         upsert=True,
     )
+    # If Paystack's metadata has a subscription_plan + shop_id we flip the
+    # shop's plan here. Helper is idempotent and will no-op if already done
+    # by the return-to-site verify call.
+    activated = False
+    if status == "success":
+        # Merge metadata from the webhook so /verify doesn't need to have
+        # been called first.
+        meta = (data.get("metadata") or {}) if isinstance(data.get("metadata"), dict) else {}
+        if meta:
+            merge = {}
+            if meta.get("subscription_plan") and not (record or {}).get("subscription_plan"):
+                merge["subscription_plan"] = meta.get("subscription_plan")
+            if meta.get("shop_id") and not (record or {}).get("shop_id"):
+                merge["shop_id"] = meta.get("shop_id")
+            if meta.get("payment_type") and not (record or {}).get("payment_type"):
+                merge["payment_type"] = meta.get("payment_type")
+            if merge:
+                db.payments.update_one({"reference": reference}, {"$set": merge})
+        fresh = db.payments.find_one({"reference": reference})
+        activated = _activate_subscription(fresh)
     _mark_order_payment((record or {}).get("order_id"), status, "card", "paystack")
-    return {"ok": True}
+    return {"ok": True, "subscription_activated": activated}
 
 
 # ─────────────────────────────────────────────────────────────────
