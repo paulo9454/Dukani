@@ -17,6 +17,11 @@ export default function PublicShopPage({ slug }) {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState("all");
 
+  // Track-order tile state
+  const [trackPhone, setTrackPhone] = useState("");
+  const [trackLoading, setTrackLoading] = useState(false);
+  const [trackError, setTrackError] = useState("");
+
   const visibleProducts = useMemo(() => {
     if (activeCategory === "all") return products;
     return products.filter((p) => (p.category || "") === activeCategory);
@@ -95,6 +100,35 @@ export default function PublicShopPage({ slug }) {
     0
   );
 
+  const lookupOrder = async () => {
+    const clean = (trackPhone || "").replace(/\s|-/g, "");
+    if (!clean || clean.length < 7) {
+      setTrackError("Please enter a valid phone number");
+      return;
+    }
+    try {
+      setTrackError("");
+      setTrackLoading(true);
+      const res = await API.get(
+        `/api/orders/lookup?phone=${encodeURIComponent(clean)}&slug=${encodeURIComponent(slug)}`
+      );
+      const id = res.data?.order_id;
+      if (id) {
+        window.location.href = `/track/${id}?contact=${encodeURIComponent(clean)}`;
+      } else {
+        setTrackError("No orders found for that phone number.");
+      }
+    } catch (err) {
+      setTrackError(
+        err?.response?.status === 404
+          ? "No orders found for that phone number."
+          : err?.response?.data?.detail || "Could not look up order"
+      );
+    } finally {
+      setTrackLoading(false);
+    }
+  };
+
   if (loading)
     return (
       <div style={shellStyle}>
@@ -156,6 +190,79 @@ export default function PublicShopPage({ slug }) {
             {shop?.category && <span>📂 {shop.category} · </span>}
             {shop?.address && <span>📍 {shop.address}</span>}
           </div>
+        </div>
+      </div>
+
+      {/* TRACK ORDER TILE */}
+      <div style={{ padding: "16px 24px 0" }}>
+        <div
+          data-testid="track-order-tile"
+          style={{
+            background: "#f1f5f9",
+            border: "1px solid #e2e8f0",
+            borderRadius: 12,
+            padding: 14,
+            display: "flex",
+            flexWrap: "wrap",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "#0f172a", marginRight: 4 }}>
+            📦 Already ordered?
+          </div>
+          <input
+            data-testid="track-phone-input"
+            type="tel"
+            inputMode="tel"
+            placeholder="Enter phone number"
+            value={trackPhone}
+            onChange={(e) => {
+              setTrackPhone(e.target.value);
+              if (trackError) setTrackError("");
+            }}
+            onKeyDown={(e) => e.key === "Enter" && lookupOrder()}
+            style={{
+              flex: "1 1 180px",
+              minHeight: 42,
+              padding: "10px 12px",
+              border: "1px solid #cbd5e1",
+              borderRadius: 8,
+              fontSize: 14,
+              background: "white",
+            }}
+          />
+          <button
+            data-testid="track-order-btn"
+            onClick={lookupOrder}
+            disabled={trackLoading}
+            style={{
+              minHeight: 44,
+              padding: "10px 18px",
+              background: "#0f172a",
+              color: "white",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: trackLoading ? "wait" : "pointer",
+              opacity: trackLoading ? 0.7 : 1,
+            }}
+          >
+            {trackLoading ? "Looking up…" : "Track order"}
+          </button>
+          {trackError && (
+            <div
+              data-testid="track-order-error"
+              style={{
+                flexBasis: "100%",
+                color: "#dc2626",
+                fontSize: 13,
+                marginTop: 2,
+              }}
+            >
+              {trackError}
+            </div>
+          )}
         </div>
       </div>
 

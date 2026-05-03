@@ -471,6 +471,39 @@ def track_order(order_id: str, contact: str | None = Query(default=None)):
     }
 
 
+# =========================================================
+# 🔎 PUBLIC ORDER LOOKUP (by phone, optionally scoped to shop)
+# Used by /shop/{slug} "Already ordered?" tile so returning
+# customers can find their latest order without the link.
+# =========================================================
+@router.get("/lookup")
+def lookup_by_phone(
+    phone: str = Query(..., min_length=6),
+    slug: str | None = Query(default=None),
+):
+    db = _get_db()
+    norm = phone.strip().replace(" ", "").replace("-", "")
+    query: dict = {
+        "$or": [
+            {"customer_info.phone": norm},
+            {"phone_number": norm},
+        ]
+    }
+    if slug:
+        shop = db.shops.find_one({"slug": slug}, {"_id": 1})
+        if shop:
+            query["shop_id"] = shop["_id"]
+    order = (
+        db.orders.find(query, {"_id": 1, "created_at": 1})
+        .sort("created_at", -1)
+        .limit(1)
+    )
+    order_list = list(order)
+    if not order_list:
+        raise HTTPException(status_code=404, detail="No orders found for this phone number")
+    return {"order_id": order_list[0]["_id"], "created_at": order_list[0].get("created_at")}
+
+
 @router.get("/{order_id}")
 def get_order(order_id: str, user=Depends(get_current_user_optional)):
     db = _get_db()

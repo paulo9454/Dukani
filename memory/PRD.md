@@ -89,6 +89,23 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Track Order tile + M-Pesa live feedback
+- Added `GET /api/orders/lookup?phone=<>&slug=<>` — public endpoint, returns the
+  most recent order for a phone number (optionally scoped to a shop slug).
+  Inserted before the generic `/{order_id}` route so the path matches first.
+- `/shop/{slug}` now has an **"Already ordered?"** tile (phone input + Track
+  order button). On submit it calls the lookup endpoint and redirects to
+  `/track/{id}?contact=<phone>`. Handles 404 gracefully with inline error.
+- Rewrote `CheckoutModal.jsx` for M-Pesa:
+  1. On `Pay` → POSTs `/orders/create` → `/payments/mpesa/stk-push` in one shot.
+  2. Switches to a **status modal** with spinner, "📲 Check your phone",
+     customer phone echoed back, total echoed back, and 3-step PIN guide.
+  3. Polls `/api/orders/track/{id}` every 3 s for up to 90 s.
+  4. Flips to success / failed / timeout view driven by `payment_status`
+     returned by the backend callback.
+- Verified via Playwright: countdown ticks 90 → 88s, status modal renders
+  with correct copy, lookup returns real order IDs from DB.
+
 ## Session: Feb 2026 — UI reliability, contrast, mobile-first, PWA
 - Added `utils/imageUrl.js` — single resolver handling http/https, legacy
   `/static/*`, current `/api/static/*`, and relative paths. Uses

@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import API from "../api/client";
 
 /**
  * Simplified customer checkout — no account, no email.
  * Phone → M-Pesa (or Pay on pickup) → Done.
+ *
+ * On M-Pesa we poll /api/orders/track/{id}?contact=<phone> every 3 s for up
+ * to 90 s so the customer sees the payment status flip from pending →
+ * success / failed in real time, without needing to refresh.
  */
 export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) {
   const [phone, setPhone] = useState("");
@@ -13,6 +17,19 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
+  // Live polling state (M-Pesa only)
+  const [paymentState, setPaymentState] = useState("idle"); // idle|waiting|success|failed|timeout
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const pollRef = useRef(null);
+  const countdownRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
+
   if (!open) return null;
 
   const total = cart.reduce(
@@ -20,6 +37,54 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
     0
   );
   const formatKES = (n) => "KES " + Number(n || 0).toLocaleString();
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+  };
+
+  const startPolling = (orderId, cleanPhone) => {
+    const TIMEOUT_SECS = 90;
+    setSecondsLeft(TIMEOUT_SECS);
+    setPaymentState("waiting");
+
+    countdownRef.current = setInterval(() => {
+      setSecondsLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+
+    pollRef.current = setInterval(async () => {
+      try {
+        const r = await API.get(
+          `/api/orders/track/${orderId}?contact=${encodeURIComponent(cleanPhone)}`
+        );
+        const ps = r.data?.payment_status;
+        if (ps === "success") {
+          setPaymentState("success");
+          stopPolling();
+        } else if (ps === "failed" || ps === "cancelled") {
+          setPaymentState("failed");
+          stopPolling();
+        }
+      } catch {
+        /* keep polling — may be a transient network blip */
+      }
+    }, 3000);
+
+    // Hard stop after TIMEOUT_SECS
+    setTimeout(() => {
+      if (pollRef.current) {
+        stopPolling();
+        // Only flip to timeout if still waiting
+        setPaymentState((prev) => (prev === "waiting" ? "timeout" : prev));
+      }
+    }, TIMEOUT_SECS * 1000);
+  };
 
   const pay = async () => {
     const clean = (phone || "").replace(/\s|-/g, "");
@@ -47,7 +112,6 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
           phone: clean,
         });
       }
-      // method === "cash": nothing to call, owner fulfils on pickup.
 
       setResult({
         order_id: orderId,
@@ -56,11 +120,10 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         phone: clean,
         total: orderRes.data.total,
         payment: payRes?.data,
-        message:
-          method === "mpesa"
-            ? "Check your phone — approve the M-Pesa prompt to complete payment."
-            : "Order placed. Pay on pickup.",
       });
+
+      // Kick off live polling for M-Pesa
+      if (method === "mpesa") startPolling(orderId, clean);
 
       onSuccess?.(orderId);
     } catch (err) {
@@ -70,35 +133,132 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
     }
   };
 
+  // ================== RESULT / STATUS VIEWS ==================
   if (result) {
+    // Cash — simple receipt
+    if (result.method === "cash") {
+      return (
+        <div style={backdrop}>
+          <div style={modal}>
+            <h2 style={{ marginTop: 0 }}>🎉 Order placed</h2>
+            <p><b>Receipt:</b>{" "}<code>{result.receipt_number || result.order_id.slice(0, 8)}</code></p>
+            <p><b>Total:</b> {formatKES(result.total)}</p>
+            <p><b>Phone:</b> {result.phone}</p>
+            <p style={{ color: "#15803d" }}>Order placed. Pay on pickup.</p>
+            <a
+              href={`/track/${result.order_id}?contact=${encodeURIComponent(result.phone)}`}
+              data-testid="checkout-track-link"
+              style={{ display: "inline-block", marginTop: 8, color: "#0f766e", fontSize: 13 }}
+            >
+              🔎 Track this order →
+            </a>
+            <button onClick={onClose} style={{ ...primaryBtn, marginTop: 12 }} data-testid="checkout-close">
+              Close
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // M-Pesa — live status view
     return (
       <div style={backdrop}>
-        <div style={modal}>
-          <h2 style={{ marginTop: 0 }}>🎉 Order placed</h2>
-          <p>
-            <b>Receipt:</b>{" "}
-            <code>{result.receipt_number || result.order_id.slice(0, 8)}</code>
-          </p>
-          <p>
-            <b>Total:</b> {formatKES(result.total)}
-          </p>
-          <p>
-            <b>Phone:</b> {result.phone}
-          </p>
-          <p style={{ color: "#16a34a" }}>{result.message}</p>
+        <div style={modal} data-testid="mpesa-status-modal">
+          {paymentState === "waiting" && (
+            <>
+              <div style={{ textAlign: "center" }}>
+                <div style={spinner} aria-hidden="true" />
+                <h2 style={{ margin: "6px 0 4px", color: "#0f172a" }}>
+                  📲 Check your phone
+                </h2>
+                <p style={{ margin: "0 0 6px", color: "#334155", fontSize: 15 }}>
+                  We&apos;ve sent an M-Pesa prompt to
+                  {" "}<b>{result.phone}</b>.
+                </p>
+                <p style={{ margin: "0 0 14px", color: "#475569", fontSize: 14 }}>
+                  Enter your M-Pesa PIN to complete payment of{" "}
+                  <b>{formatKES(result.total)}</b>.
+                </p>
+              </div>
+
+              <ol style={stepList}>
+                <li>M-Pesa prompt pops up on your phone</li>
+                <li>Enter your M-Pesa PIN</li>
+                <li>You&apos;ll see the order marked paid here automatically</li>
+              </ol>
+
+              <div
+                data-testid="mpesa-countdown"
+                style={{
+                  textAlign: "center",
+                  marginTop: 10,
+                  color: "#475569",
+                  fontSize: 13,
+                }}
+              >
+                Waiting for confirmation… <b>{secondsLeft}s</b>
+              </div>
+            </>
+          )}
+
+          {paymentState === "success" && (
+            <div style={{ textAlign: "center" }} data-testid="mpesa-success">
+              <div style={{ fontSize: 44 }}>✅</div>
+              <h2 style={{ margin: "6px 0", color: "#15803d" }}>Payment received</h2>
+              <p style={{ color: "#334155" }}>
+                Receipt <code>{result.receipt_number || result.order_id.slice(0, 8)}</code>
+                {" · "} {formatKES(result.total)}
+              </p>
+            </div>
+          )}
+
+          {paymentState === "failed" && (
+            <div style={{ textAlign: "center" }} data-testid="mpesa-failed">
+              <div style={{ fontSize: 44 }}>❌</div>
+              <h2 style={{ margin: "6px 0", color: "#b91c1c" }}>Payment failed</h2>
+              <p style={{ color: "#334155", fontSize: 14 }}>
+                You may have cancelled the prompt, entered the wrong PIN, or had
+                insufficient balance. Try again any time.
+              </p>
+            </div>
+          )}
+
+          {paymentState === "timeout" && (
+            <div style={{ textAlign: "center" }} data-testid="mpesa-timeout">
+              <div style={{ fontSize: 44 }}>⏱️</div>
+              <h2 style={{ margin: "6px 0", color: "#b45309" }}>
+                Still waiting for M-Pesa…
+              </h2>
+              <p style={{ color: "#334155", fontSize: 14 }}>
+                We didn&apos;t get a confirmation yet. If you&apos;ve already
+                paid, the order will update when Safaricom notifies us.
+              </p>
+            </div>
+          )}
+
           <a
-            href={`/track/${result.order_id}`}
+            href={`/track/${result.order_id}?contact=${encodeURIComponent(result.phone)}`}
             data-testid="checkout-track-link"
             style={{
-              display: "inline-block",
-              marginTop: 8,
+              display: "block",
+              textAlign: "center",
+              marginTop: 14,
               color: "#0f766e",
               fontSize: 13,
+              fontWeight: 600,
             }}
           >
-            🔎 Track this order →
+            🔎 Open full order page →
           </a>
-          <button onClick={onClose} style={{ ...primaryBtn, marginTop: 12 }} data-testid="checkout-close">
+
+          <button
+            onClick={() => {
+              stopPolling();
+              onClose();
+            }}
+            style={{ ...primaryBtn, marginTop: 12 }}
+            data-testid="checkout-close"
+          >
             Close
           </button>
         </div>
@@ -106,11 +266,12 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
     );
   }
 
+  // ================== CHECKOUT FORM ==================
   return (
     <div style={backdrop}>
       <div style={modal}>
-        <h2 style={{ marginTop: 0 }}>Checkout</h2>
-        <p style={{ color: "#64748b", marginTop: 0 }}>
+        <h2 style={{ marginTop: 0, color: "#0f172a" }}>Checkout</h2>
+        <p style={{ color: "#475569", marginTop: 0 }}>
           {cart.length} item{cart.length === 1 ? "" : "s"} · {formatKES(total)}
         </p>
 
@@ -130,7 +291,9 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
           style={{ ...input, marginTop: 8 }}
         />
 
-        <div style={{ marginTop: 12, fontWeight: 600 }}>Payment method</div>
+        <div style={{ marginTop: 12, fontWeight: 600, color: "#0f172a" }}>
+          Payment method
+        </div>
         <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
           {[
             { v: "mpesa", l: "🟢 M-Pesa" },
@@ -164,7 +327,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
             style={{ ...primaryBtn, opacity: loading ? 0.7 : 1 }}
           >
             {loading
-              ? "⏳ Processing…"
+              ? "⏳ Sending…"
               : method === "cash"
               ? `Place order (${formatKES(total)})`
               : `Pay ${formatKES(total)}`}
@@ -177,7 +340,7 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
             display: "flex",
             gap: 10,
             justifyContent: "center",
-            color: "#64748b",
+            color: "#475569",
             fontSize: 12,
             flexWrap: "wrap",
           }}
@@ -197,49 +360,82 @@ const backdrop = {
   alignItems: "center",
   justifyContent: "center",
   zIndex: 9999,
+  padding: 16,
 };
 const modal = {
-  width: 420,
+  width: 440,
   maxWidth: "92vw",
   background: "white",
   borderRadius: 14,
   padding: 24,
-  boxShadow: "0 18px 40px rgba(0,0,0,0.25)",
+  boxShadow: "0 18px 40px rgba(15,23,42,0.25)",
   fontFamily: "system-ui, sans-serif",
 };
 const input = {
   width: "100%",
-  padding: 10,
+  padding: 12,
+  minHeight: 44,
   borderRadius: 8,
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
   marginTop: 8,
+  fontSize: 15,
+  color: "#0f172a",
 };
 const methodBtn = (active) => ({
   flex: 1,
-  padding: "10px",
+  padding: 12,
+  minHeight: 46,
   background: active ? "#16a34a" : "#f1f5f9",
   color: active ? "white" : "#0f172a",
   border: "none",
   borderRadius: 8,
   cursor: "pointer",
-  fontWeight: 600,
+  fontWeight: 700,
 });
 const primaryBtn = {
   flex: 1,
-  padding: 12,
+  padding: 14,
+  minHeight: 48,
   background: "#16a34a",
   color: "white",
   border: "none",
   borderRadius: 8,
-  fontWeight: 600,
+  fontWeight: 700,
   cursor: "pointer",
+  fontSize: 15,
 };
 const secondaryBtn = {
-  padding: "12px 16px",
+  padding: "12px 18px",
+  minHeight: 48,
   background: "#f1f5f9",
   color: "#0f172a",
   border: "none",
   borderRadius: 8,
   cursor: "pointer",
+  fontWeight: 600,
 };
+const stepList = {
+  margin: "8px 0 0",
+  paddingLeft: 20,
+  color: "#334155",
+  fontSize: 14,
+  lineHeight: 1.6,
+};
+const spinner = {
+  width: 46,
+  height: 46,
+  margin: "8px auto",
+  borderRadius: "50%",
+  border: "4px solid #dcfce7",
+  borderTopColor: "#16a34a",
+  animation: "dukayko-spin 0.9s linear infinite",
+};
+
+// keyframes are injected once
+if (typeof document !== "undefined" && !document.getElementById("dk-spin-kf")) {
+  const s = document.createElement("style");
+  s.id = "dk-spin-kf";
+  s.textContent = "@keyframes dukayko-spin{to{transform:rotate(360deg)}}";
+  document.head.appendChild(s);
+}
