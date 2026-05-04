@@ -2,12 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 node_modules/
-.env
-backend/.env
 playwright-report/
 frontend/dist/
 venv/
-__pycache__/
-*.pyc
-.env
-frontend/dist/

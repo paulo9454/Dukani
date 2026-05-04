@@ -25,8 +25,12 @@ def list_vendors():
 def marketplace_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()
     if user["role"] == "shopkeeper":
-        return list(db.orders.find({"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}}))
-    return list(db.orders.find({}))
+        return list(
+            db.orders.find({"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}})
+            .sort("created_at", -1)
+            .limit(200)
+        )
+    return list(db.orders.find({}).sort("created_at", -1).limit(200))
 
 
 @router.post("/orders/{order_id}/receive")

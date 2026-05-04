@@ -58,7 +58,7 @@ def _public_shop_view(shop: dict, slug: str) -> dict:
 @router.get("/home")
 def home():
     db = get_db()
-    shops = [s for s in db.shops.find({}) if _online_eligible(s)]
+    shops = [s for s in db.shops.find({}).limit(200) if _online_eligible(s)]
     shop_ids = [s["_id"] for s in shops]
     featured = list(
         db.products.find({"is_public": True, "shop_id": {"$in": shop_ids}}).limit(8)
@@ -101,10 +101,17 @@ def public_products(
             {"description": {"$regex": q, "$options": "i"}},
         ]
 
-    products = list(db.products.find(filters))
+    products = list(db.products.find(filters).limit(100))
+    if not products:
+        return []
+    shop_ids = list({p.get("shop_id") for p in products if p.get("shop_id")})
+    shops = {
+        s["_id"]: s
+        for s in db.shops.find({"_id": {"$in": shop_ids}})
+    }
     valid = []
     for p in products:
-        shop = db.shops.find_one({"_id": p.get("shop_id")})
+        shop = shops.get(p.get("shop_id"))
         if shop and _online_eligible(shop):
             valid.append(p)
     return valid
@@ -117,7 +124,7 @@ def public_products(
 def list_public_shops():
     db = get_db()
     out = []
-    for s in db.shops.find({}):
+    for s in db.shops.find({}).limit(200):
         if not _online_eligible(s):
             continue
         slug = _ensure_slug(db, s)
@@ -183,7 +190,7 @@ def nearby_shops(
 ):
     db = get_db()
     ranked = []
-    for shop in db.shops.find({}):
+    for shop in db.shops.find({}).limit(200):
         if not _online_eligible(shop):
             continue
         try:

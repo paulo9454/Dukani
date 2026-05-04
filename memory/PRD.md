@@ -374,6 +374,30 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   - 2nd owner /api/orders & /api/products: empty (correct tenant isolation)
 - Untouched per spec: POS checkout logic, STK push, Paystack subscription.
 
+## Session: Feb 2026 — Deploy hardening (root cause: misconfigured env var)
+- **Root cause of deploy crash** (`ValueError: invalid literal for int() with
+  base 10: 'sk_live_...'`): in the user's deploy console, a Paystack secret
+  was pasted into the wrong env-var slot (one of `ACCESS_TOKEN_EXPIRE_MINUTES`,
+  `REFRESH_TOKEN_EXPIRE_MINUTES`, or `SMTP_PORT`). At import time
+  `int(os.getenv(...))` blew up before the app could serve a request.
+- **Fix**: added `core/settings.py::_int_env(name, default)` and a try/except
+  around `SMTP_PORT` parsing in `services/email_service.py`. Bad ints now
+  fall back to the default and log a clear, named ERROR ("Env var X='sk_live_…'
+  is not a valid integer — falling back to N. Check your deployment
+  configuration."). Backend boots even with malformed numeric env vars.
+- **Reproduced + verified**: launched backend with the bad value injected;
+  settings module loaded successfully and emitted the new warning.
+- **Deploy build context**: removed `.env` and `backend/.env` entries from
+  `/app/.gitignore` so deployment image actually contains the file.
+- **Performance pass** (deployment_agent flags):
+  - `marketplace.py` orders queries → `.sort("created_at",-1).limit(200)`.
+  - `public.py` home/products/shops/nearby_shops → bounded with `.limit(...)`,
+    plus the N+1 in `/products` collapsed into a single `find({_id:{$in:…}})`
+    shop lookup.
+- **What the user must do in the deploy console**: open the misset env var
+  and replace its value back to the correct integer (defaults: 30 / 10080 /
+  587). The Paystack secret only belongs in `PAYSTACK_SECRET_KEY`.
+
 ## Session: Feb 2026 — UI reliability, contrast, mobile-first, PWA
 - Added `utils/imageUrl.js` — single resolver handling http/https, legacy
   `/static/*`, current `/api/static/*`, and relative paths. Uses
