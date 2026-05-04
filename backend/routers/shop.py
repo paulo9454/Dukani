@@ -179,6 +179,11 @@ def get_mpesa_settings(
         "mpesa_shortcode": shop.get("mpesa_shortcode", ""),
         "mpesa_business_name": shop.get("mpesa_business_name", ""),
         "mpesa_env": shop.get("mpesa_env", "sandbox"),
+        # Manual fallback fields (safe to echo back in full — these are
+        # meant to be visible to the public on the shop page).
+        "mpesa_till_number": shop.get("mpesa_till_number", ""),
+        "mpesa_paybill_number": shop.get("mpesa_paybill_number", ""),
+        "mpesa_account_name": shop.get("mpesa_account_name", ""),
         # Sensitive fields are never returned in full — only masked preview.
         "mpesa_consumer_key_masked": _mask(shop.get("mpesa_consumer_key")),
         "mpesa_consumer_secret_masked": _mask(shop.get("mpesa_consumer_secret")),
@@ -208,6 +213,9 @@ def update_mpesa_settings(
         "mpesa_passkey",
         "mpesa_business_name",
         "mpesa_env",
+        "mpesa_till_number",
+        "mpesa_paybill_number",
+        "mpesa_account_name",
     ):
         v = payload.get(k)
         if v is not None and str(v).strip():

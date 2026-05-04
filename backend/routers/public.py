@@ -27,6 +27,12 @@ def _ensure_slug(db, shop: dict) -> str:
 
 
 def _public_shop_view(shop: dict, slug: str) -> dict:
+    mpesa_configured = bool(
+        shop.get("mpesa_consumer_key")
+        and shop.get("mpesa_consumer_secret")
+        and shop.get("mpesa_shortcode")
+        and shop.get("mpesa_passkey")
+    )
     return {
         "_id": shop["_id"],
         "slug": slug,
@@ -38,6 +44,11 @@ def _public_shop_view(shop: dict, slug: str) -> dict:
         "latitude": shop.get("latitude"),
         "longitude": shop.get("longitude"),
         "subscription_plan": shop.get("subscription_plan"),
+        # Payment capabilities — customer-safe (no secrets, never).
+        "mpesa_configured": mpesa_configured,
+        "mpesa_till_number": shop.get("mpesa_till_number") or "",
+        "mpesa_paybill_number": shop.get("mpesa_paybill_number") or "",
+        "mpesa_account_name": shop.get("mpesa_account_name") or shop.get("name") or "",
     }
 
 

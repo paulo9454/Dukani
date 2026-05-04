@@ -89,6 +89,37 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   (owner → /owner, shopkeeper → /shopkeeper). Unauthenticated users always see
   the login screen regardless of path.
 
+## Session: Feb 2026 — Manual M-Pesa fallback
+- **Backend**:
+  - `shops` doc extended with `mpesa_till_number`, `mpesa_paybill_number`,
+    `mpesa_account_name`. `GET/PUT /api/shop/{id}/mpesa-settings` reads and
+    writes all three.
+  - `GET /api/public/shop/{slug}` now returns `mpesa_configured` (boolean)
+    and the three customer-safe manual fields. Secrets are never exposed.
+  - New `POST /api/orders/{id}/mark-paid-manual` — phone-match authorised,
+    flips `payment_method=mpesa_manual`, `payment_status=pending_confirmation`,
+    stamps `mpesa_manual_claimed_at`. No-ops if already paid.
+- **Frontend**:
+  - `CheckoutModal` now receives `shop` prop and renders methods
+    dynamically: "🟢 M-Pesa (Instant)" appears only if `mpesa_configured`;
+    "💵 Pay manually (M-Pesa)" always; "💵 Pay on pickup" always.
+  - Manual flow shows a new view with InfoRow tiles for Till / PayBill /
+    Reference / Amount — each with a one-tap Copy button. If the shop has
+    NO M-Pesa details, the fallback copy asks the customer to wait for the
+    owner to reach out on their phone number.
+  - "I have paid" button calls the new endpoint and flips to a green
+    "We will confirm your payment shortly." banner.
+  - `MPesaSettingsModal` got a new "💵 Manual M-Pesa (fallback)" block with
+    Till / PayBill / Account inputs next to the Daraja config.
+- **Verified** via curl + Playwright:
+  - Public shop exposes the new flags ✓
+  - PUT saves till_number + account_name ✓
+  - mark-paid-manual: right phone → 200, wrong phone → 403 ✓
+  - Track shows `payment_method=mpesa_manual, payment_status=pending_confirmation` ✓
+  - Checkout on Daraja-less shop hides STK, shows manual modal with
+    contact-owner fallback copy ✓
+- **STK flow & callback untouched.**
+
 ## Session: Feb 2026 — Paystack iframe fix + /payment-success route
 - **Root cause of "checkout.paystack.com refused to connect"**: the preview
   renders the app in an iframe, and `window.location.href = paystack_url`

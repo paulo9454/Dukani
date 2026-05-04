@@ -438,6 +438,7 @@ export default function PublicShopPage({ slug }) {
         open={checkoutOpen}
         onClose={() => setCheckoutOpen(false)}
         slug={slug}
+        shop={shop}
         cart={cart}
         onSuccess={() => setCart([])}
       />

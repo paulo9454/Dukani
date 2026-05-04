@@ -18,6 +18,9 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
     mpesa_passkey: "",
     mpesa_business_name: "",
     mpesa_env: "sandbox",
+    mpesa_till_number: "",
+    mpesa_paybill_number: "",
+    mpesa_account_name: "",
   });
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -41,6 +44,9 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
           mpesa_shortcode: r.data?.mpesa_shortcode || "",
           mpesa_business_name: r.data?.mpesa_business_name || shop?.name || "",
           mpesa_env: r.data?.mpesa_env || "sandbox",
+          mpesa_till_number: r.data?.mpesa_till_number || "",
+          mpesa_paybill_number: r.data?.mpesa_paybill_number || "",
+          mpesa_account_name: r.data?.mpesa_account_name || "",
           // secrets are write-only on this form
           mpesa_consumer_key: "",
           mpesa_consumer_secret: "",
@@ -68,6 +74,9 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
         mpesa_shortcode: form.mpesa_shortcode,
         mpesa_business_name: form.mpesa_business_name,
         mpesa_env: form.mpesa_env,
+        mpesa_till_number: form.mpesa_till_number,
+        mpesa_paybill_number: form.mpesa_paybill_number,
+        mpesa_account_name: form.mpesa_account_name,
       };
       if (form.mpesa_consumer_key) payload.mpesa_consumer_key = form.mpesa_consumer_key;
       if (form.mpesa_consumer_secret) payload.mpesa_consumer_secret = form.mpesa_consumer_secret;
@@ -177,6 +186,51 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
               <option value="sandbox">Sandbox (for testing)</option>
               <option value="production">Production (real money)</option>
             </select>
+
+            <div
+              style={{
+                marginTop: 16,
+                padding: 12,
+                background: "#f8fafc",
+                border: "1px dashed #cbd5e1",
+                borderRadius: 10,
+              }}
+            >
+              <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 13 }}>
+                💵 Manual M-Pesa (fallback)
+              </div>
+              <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
+                Shown to customers when STK push isn&apos;t available. Fill in
+                your Till OR PayBill — one is enough.
+              </div>
+
+              <label style={{ ...label, marginTop: 10 }}>Till Number</label>
+              <input
+                data-testid="mpesa-till"
+                value={form.mpesa_till_number}
+                onChange={(e) => update("mpesa_till_number", e.target.value)}
+                placeholder="e.g. 123456"
+                style={input}
+              />
+
+              <label style={label}>PayBill Number</label>
+              <input
+                data-testid="mpesa-paybill"
+                value={form.mpesa_paybill_number}
+                onChange={(e) => update("mpesa_paybill_number", e.target.value)}
+                placeholder="e.g. 400123"
+                style={input}
+              />
+
+              <label style={label}>Account / Reference (PayBill only)</label>
+              <input
+                data-testid="mpesa-account"
+                value={form.mpesa_account_name}
+                onChange={(e) => update("mpesa_account_name", e.target.value)}
+                placeholder="e.g. SHOP01 — leave empty to use order ID"
+                style={input}
+              />
+            </div>
 
             <label style={label}>
               Consumer key{" "}

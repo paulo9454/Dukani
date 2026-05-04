@@ -1,35 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import API from "../api/client";
+import { toast } from "../utils/toast";
+import { copyShopLink as _unused } from "../utils/share"; // eslint-disable-line no-unused-vars
 
-/**
- * Simplified customer checkout — no account, no email.
- * Phone → M-Pesa (or Pay on pickup) → Done.
- *
- * On M-Pesa we poll /api/orders/track/{id}?contact=<phone> every 3 s for up
- * to 90 s so the customer sees the payment status flip from pending →
- * success / failed in real time, without needing to refresh.
- * If it times out or fails, a "Resend M-Pesa prompt" button triggers
- * POST /api/payments/mpesa/retry (max 3 retries enforced server-side).
- */
 const POLL_TIMEOUT_SECS = 90;
 
-export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) {
+// Build the 3-method option list based on shop capabilities.
+function availableMethods(shop) {
+  const methods = [];
+  if (shop?.mpesa_configured) {
+    methods.push({ v: "mpesa", l: "🟢 M-Pesa (Instant)" });
+  }
+  if (shop?.mpesa_till_number || shop?.mpesa_paybill_number) {
+    methods.push({ v: "mpesa_manual", l: "💵 Pay manually (M-Pesa)" });
+  } else if (!shop?.mpesa_configured) {
+    // Shop has NO M-Pesa setup at all — still offer manual so customer can
+    // message the owner directly; manual UI shows "contact the owner".
+    methods.push({ v: "mpesa_manual", l: "💵 Pay manually (M-Pesa)" });
+  }
+  methods.push({ v: "cash", l: "💵 Pay on pickup" });
+  return methods;
+}
+
+export default function CheckoutModal({ open, onClose, slug, shop, cart, onSuccess }) {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
-  const [method, setMethod] = useState("mpesa");
+  const methods = availableMethods(shop);
+  const [method, setMethod] = useState(methods[0]?.v || "mpesa_manual");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
 
-  // Live polling / retry state (M-Pesa only)
+  // Live polling / retry state (M-Pesa STK only)
   const [paymentState, setPaymentState] = useState("idle"); // idle|waiting|success|failed|timeout
   const [secondsLeft, setSecondsLeft] = useState(0);
   const [retryLoading, setRetryLoading] = useState(false);
   const [retryError, setRetryError] = useState("");
-  const [retriesLeft, setRetriesLeft] = useState(null); // null = unknown / not used
+  const [retriesLeft, setRetriesLeft] = useState(null);
   const pollRef = useRef(null);
   const countdownRef = useRef(null);
   const timeoutRef = useRef(null);
+
+  // Manual claim state
+  const [manualClaimed, setManualClaimed] = useState(false);
+  const [manualClaiming, setManualClaiming] = useState(false);
 
   useEffect(() => {
     return () => stopPolling();
@@ -152,6 +166,31 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
     }
   };
 
+  const claimManualPaid = async () => {
+    if (!result?.order_id) return;
+    try {
+      setManualClaiming(true);
+      await API.post(`/api/orders/${result.order_id}/mark-paid-manual`, {
+        phone: result.phone,
+      });
+      setManualClaimed(true);
+      toast("✅ Thanks — owner will confirm shortly.", { variant: "success", duration: 3000 });
+    } catch (err) {
+      toast(err?.response?.data?.detail || "Could not mark as paid");
+    } finally {
+      setManualClaiming(false);
+    }
+  };
+
+  const copyText = async (text, label = "Copied") => {
+    try {
+      await navigator.clipboard.writeText(String(text));
+      toast(label);
+    } catch {
+      toast("Could not copy");
+    }
+  };
+
   // ================== RESULT / STATUS VIEWS ==================
   if (result) {
     // Cash — simple receipt
@@ -179,7 +218,106 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
       );
     }
 
-    // M-Pesa — live status view
+    // Manual M-Pesa — show pay-to instructions
+    if (result.method === "mpesa_manual") {
+      const till = shop?.mpesa_till_number;
+      const paybill = shop?.mpesa_paybill_number;
+      const accountName = shop?.mpesa_account_name || shop?.name || "Shop";
+      const hasDestination = Boolean(till || paybill);
+      return (
+        <div style={backdrop}>
+          <div style={modal} data-testid="manual-mpesa-modal">
+            <h2 style={{ marginTop: 0, color: "#0f172a" }}>
+              Pay via M-Pesa
+            </h2>
+            {!hasDestination ? (
+              <p style={{ color: "#b45309", fontSize: 14 }}>
+                This shop hasn&apos;t added M-Pesa details yet. Please contact
+                the owner directly — we&apos;ve saved your order and they will
+                reach out on <b>{result.phone}</b>.
+              </p>
+            ) : (
+              <>
+                <p style={{ color: "#334155", fontSize: 14, margin: "0 0 10px" }}>
+                  On your phone, go to <b>M-Pesa → Lipa na M-Pesa →{" "}
+                  {till ? "Buy Goods & Services" : "PayBill"}</b>, then:
+                </p>
+                {till && (
+                  <InfoRow label="Till Number" value={till} onCopy={() => copyText(till, "Till number copied")} testId="manual-till" />
+                )}
+                {paybill && (
+                  <InfoRow label="PayBill" value={paybill} onCopy={() => copyText(paybill, "PayBill copied")} testId="manual-paybill" />
+                )}
+                <InfoRow
+                  label={paybill ? "Account" : "Reference"}
+                  value={(result.receipt_number || result.order_id.slice(0, 8)).toUpperCase()}
+                  onCopy={() => copyText(result.receipt_number || result.order_id.slice(0, 8), "Reference copied")}
+                  testId="manual-reference"
+                />
+                <InfoRow
+                  label="Amount"
+                  value={formatKES(result.total)}
+                  onCopy={() => copyText(Math.round(result.total || 0), "Amount copied")}
+                  testId="manual-amount"
+                />
+                {accountName && (
+                  <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+                    Paying: <b>{accountName}</b>
+                  </div>
+                )}
+              </>
+            )}
+
+            {manualClaimed ? (
+              <div
+                data-testid="manual-confirmed"
+                style={{
+                  marginTop: 14,
+                  padding: 12,
+                  background: "#dcfce7",
+                  color: "#15803d",
+                  borderRadius: 10,
+                  fontSize: 14,
+                }}
+              >
+                ✅ We will confirm your payment shortly.
+              </div>
+            ) : (
+              <button
+                data-testid="manual-paid-btn"
+                onClick={claimManualPaid}
+                disabled={manualClaiming || !hasDestination}
+                style={{
+                  ...primaryBtn,
+                  marginTop: 14,
+                  opacity: manualClaiming || !hasDestination ? 0.7 : 1,
+                }}
+              >
+                {manualClaiming ? "Sending…" : "I have paid"}
+              </button>
+            )}
+
+            <a
+              href={`/track/${result.order_id}?contact=${encodeURIComponent(result.phone)}`}
+              data-testid="checkout-track-link"
+              style={{ display: "block", textAlign: "center", marginTop: 12, color: "#0f766e", fontSize: 13, fontWeight: 600 }}
+            >
+              🔎 Open full order page →
+            </a>
+
+            <button
+              onClick={onClose}
+              style={{ ...secondaryBtn, width: "100%", marginTop: 10 }}
+              data-testid="checkout-close"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // M-Pesa STK — live status view
     const showResend = paymentState === "timeout" || paymentState === "failed";
 
     return (
@@ -365,16 +503,13 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
         <div style={{ marginTop: 12, fontWeight: 600, color: "#0f172a" }}>
           Payment method
         </div>
-        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-          {[
-            { v: "mpesa", l: "🟢 M-Pesa" },
-            { v: "cash", l: "💵 Pay on pickup" },
-          ].map((o) => (
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          {methods.map((o) => (
             <button
               key={o.v}
               data-testid={`co-method-${o.v}`}
               onClick={() => setMethod(o.v)}
-              style={methodBtn(method === o.v)}
+              style={{ ...methodBtn(method === o.v), flex: "1 1 140px" }}
             >
               {o.l}
             </button>
@@ -401,6 +536,8 @@ export default function CheckoutModal({ open, onClose, slug, cart, onSuccess }) 
               ? "⏳ Sending…"
               : method === "cash"
               ? `Place order (${formatKES(total)})`
+              : method === "mpesa_manual"
+              ? `Show M-Pesa details (${formatKES(total)})`
               : `Pay ${formatKES(total)}`}
           </button>
         </div>
@@ -508,4 +645,52 @@ if (typeof document !== "undefined" && !document.getElementById("dk-spin-kf")) {
   s.id = "dk-spin-kf";
   s.textContent = "@keyframes dukayko-spin{to{transform:rotate(360deg)}}";
   document.head.appendChild(s);
+}
+
+function InfoRow({ label, value, onCopy, testId }) {
+  return (
+    <div
+      data-testid={testId}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        background: "#f8fafc",
+        border: "1px solid #e2e8f0",
+        padding: "10px 12px",
+        borderRadius: 10,
+        marginTop: 8,
+        gap: 8,
+      }}
+    >
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.3 }}>
+          {label}
+        </div>
+        <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 15, wordBreak: "break-all" }}>
+          {value}
+        </div>
+      </div>
+      {onCopy && (
+        <button
+          onClick={onCopy}
+          data-testid={testId ? `${testId}-copy` : undefined}
+          style={{
+            background: "#0f172a",
+            color: "#fff",
+            border: "none",
+            borderRadius: 8,
+            padding: "8px 12px",
+            minHeight: 36,
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          📋 Copy
+        </button>
+      )}
+    </div>
+  );
 }

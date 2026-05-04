@@ -446,6 +446,37 @@ def my_orders(user=Depends(require_roles("customer", "owner", "shopkeeper", "adm
 # =========================================================
 # 🔎 PUBLIC ORDER TRACKING (by id + contact match)
 # =========================================================
+@router.post("/{order_id}/mark-paid-manual")
+def mark_paid_manual(order_id: str, payload: dict = Body(default={})):
+    """Customer-triggered "I have paid manually" acknowledgement.
+
+    Moves the order to `payment_status=pending_confirmation` so the owner
+    knows to check their M-Pesa for the matching transaction. Requires a
+    phone-number match so a random visitor can't flip someone else's order.
+    """
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    phone = str(payload.get("phone") or "").strip().replace(" ", "").replace("-", "")
+    info = order.get("customer_info") or {}
+    stored = (info.get("phone") or order.get("phone_number") or "").strip()
+    if stored and phone and stored != phone:
+        raise HTTPException(status_code=403, detail="Phone does not match this order")
+    if order.get("payment_status") == "success":
+        return {"ok": True, "already_paid": True}
+    db.orders.update_one(
+        {"_id": order_id},
+        {"$set": {
+            "payment_method": "mpesa_manual",
+            "payment_provider": "mpesa_manual",
+            "payment_status": "pending_confirmation",
+            "mpesa_manual_claimed_at": _dt.now(_tz.utc).isoformat(),
+        }},
+    )
+    return {"ok": True, "payment_status": "pending_confirmation"}
+
+
 @router.get("/track/{order_id}")
 def track_order(order_id: str, contact: str | None = Query(default=None)):
     db = _get_db()
