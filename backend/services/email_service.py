@@ -26,7 +26,12 @@ def _send_raw(to_email: str, subject: str, html_body: str, text_body: Optional[s
         return {"sent": False, "reason": "smtp_not_configured"}
 
     host = os.getenv("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
+    raw_port = os.getenv("SMTP_PORT", "587")
+    try:
+        port = int(raw_port)
+    except (TypeError, ValueError):
+        print(f"[email_service] SMTP_PORT={raw_port!r} is not numeric; defaulting to 587")
+        port = 587
     user = os.getenv("SMTP_USER")
     password = os.getenv("SMTP_PASSWORD")
     sender = os.getenv("SMTP_FROM") or user
