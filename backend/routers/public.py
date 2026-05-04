@@ -9,9 +9,30 @@ router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 # =========================
 # PLAN HELPERS
 # =========================
+ONLINE_PLANS = ("pos_online", "online", "enterprise")
+
+# MongoDB filter for "this shop is allowed to sell online" — applied at the
+# database level so we never pull `mpesa_*` secrets just to filter in Python.
+ONLINE_ELIGIBLE_FILTER = {
+    "$or": [
+        {"subscription_plan": {"$in": list(ONLINE_PLANS)}},
+        {"is_online_enabled": True},
+        {"online_enabled": True},
+    ]
+}
+
+# Public-safe shop projection — exclude all secrets (consumer keys, passkey)
+# even from the in-memory document so we cannot accidentally leak them.
+PUBLIC_SHOP_PROJECTION = {
+    "mpesa_consumer_key": 0,
+    "mpesa_consumer_secret": 0,
+    "mpesa_passkey": 0,
+}
+
+
 def _online_eligible(shop: dict) -> bool:
     plan = shop.get("subscription_plan")
-    if plan in {"pos_online", "online", "enterprise"}:
+    if plan in ONLINE_PLANS:
         return True
     # legacy flag still respected
     return bool(shop.get("is_online_enabled") or shop.get("online_enabled"))
@@ -58,10 +79,17 @@ def _public_shop_view(shop: dict, slug: str) -> dict:
 @router.get("/home")
 def home():
     db = get_db()
-    shops = [s for s in db.shops.find({}).limit(200) if _online_eligible(s)]
-    shop_ids = [s["_id"] for s in shops]
+    shop_ids = [
+        s["_id"]
+        for s in db.shops.find(
+            ONLINE_ELIGIBLE_FILTER, {"_id": 1}
+        ).limit(200)
+    ]
     featured = list(
-        db.products.find({"is_public": True, "shop_id": {"$in": shop_ids}}).limit(8)
+        db.products.find(
+            {"is_public": True, "shop_id": {"$in": shop_ids}},
+            {"_id": 1, "name": 1, "price": 1, "image": 1, "shop_id": 1},
+        ).limit(8)
     )
     return {"hero": "Welcome to Dukayko", "featured": featured}
 
@@ -105,16 +133,14 @@ def public_products(
     if not products:
         return []
     shop_ids = list({p.get("shop_id") for p in products if p.get("shop_id")})
-    shops = {
-        s["_id"]: s
-        for s in db.shops.find({"_id": {"$in": shop_ids}})
+    eligible_ids = {
+        s["_id"]
+        for s in db.shops.find(
+            {"_id": {"$in": shop_ids}, **ONLINE_ELIGIBLE_FILTER},
+            {"_id": 1},
+        )
     }
-    valid = []
-    for p in products:
-        shop = shops.get(p.get("shop_id"))
-        if shop and _online_eligible(shop):
-            valid.append(p)
-    return valid
+    return [p for p in products if p.get("shop_id") in eligible_ids]
 
 
 # =========================
@@ -124,9 +150,7 @@ def public_products(
 def list_public_shops():
     db = get_db()
     out = []
-    for s in db.shops.find({}).limit(200):
-        if not _online_eligible(s):
-            continue
+    for s in db.shops.find(ONLINE_ELIGIBLE_FILTER, PUBLIC_SHOP_PROJECTION).limit(200):
         slug = _ensure_slug(db, s)
         out.append(_public_shop_view(s, slug))
     return out
@@ -190,16 +214,18 @@ def nearby_shops(
 ):
     db = get_db()
     ranked = []
-    for shop in db.shops.find({}).limit(200):
-        if not _online_eligible(shop):
-            continue
+    nearby_projection = {
+        "_id": 1, "slug": 1, "name": 1, "category": 1, "address": 1,
+        "latitude": 1, "longitude": 1,
+    }
+    for shop in db.shops.find(ONLINE_ELIGIBLE_FILTER, nearby_projection).limit(200):
         try:
             shop_lat = float(shop["latitude"])
             shop_lng = float(shop["longitude"])
         except (TypeError, ValueError, KeyError):
             continue
         distance_km = haversine_km(lat, lng, shop_lat, shop_lng)
-        slug = _ensure_slug(db, shop)
+        slug = shop.get("slug") or _ensure_slug(db, shop)
         ranked.append({
             "_id": shop.get("_id"),
             "slug": slug,

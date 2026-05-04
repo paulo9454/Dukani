@@ -337,6 +337,7 @@ def get_sales(user=Depends(require_roles("owner", "admin", "partner"))):
             },
         )
         .sort("created_at", -1)
+        .limit(1000)
     )
 
     def is_online_order(o: dict) -> bool:

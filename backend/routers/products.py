@@ -58,7 +58,7 @@ def list_products(
         filters["barcode"] = barcode
     if q:
         filters["name"] = {"$regex": q, "$options": "i"}
-    return list(db.products.find(filters))
+    return list(db.products.find(filters).limit(500))
 
 
 # =========================

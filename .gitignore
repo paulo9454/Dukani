@@ -5,3 +5,4 @@ node_modules/
 playwright-report/
 frontend/dist/
 venv/
+memory/test_credentials.md
