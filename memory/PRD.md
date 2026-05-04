@@ -339,6 +339,41 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
     via direct shop_id query (read-only — checkout still blocks). Should
     be tightened in the next tenant-isolation sweep.
 
+## Session: Feb 2026 — P0.5 products tenant scope + P1 manual M-Pesa confirm/reject
+- **P0.5 — products endpoint tenant leak**: `GET /api/products?shop_id=X`
+  used to accept any shop_id from any caller. Now enforces:
+  - Shopkeeper: must have `shop_id` in their live `assignments`. Without
+    `shop_id`, query is auto-scoped to all assigned shops.
+  - Owner / partner: `shop_id` (if provided) must be owned by them.
+    Without it, query is auto-scoped to their own shops.
+  - Admin: unchanged.
+- **P1 — manual M-Pesa confirm/reject** (closes the loop on
+  `mark-paid-manual` claims):
+  - `POST /api/orders/{id}/confirm-payment` — owner-of-shop only, only when
+    `payment_status == "pending_confirmation"`. Sets `payment_status=success`,
+    `status=paid`, `paid_at=now`, plus `manually_confirmed_by/at` audit fields.
+  - `POST /api/orders/{id}/reject-payment` — same auth + state guard, sets
+    `payment_status=failed`, stores optional `manual_rejection_reason` and
+    `manually_rejected_by/at`.
+  - Cross-tenant: a different owner gets `403 Not allowed`.
+  - Re-confirm/re-reject: `400` (state guard).
+  - Frontend `Orders.jsx`: ✅ Confirm payment + ❌ Reject payment buttons
+    appear ONLY when `payment_status === "pending_confirmation"`. Reject
+    prompts for an optional reason. Payment badge now renders
+    `pending_confirmation → "awaiting confirm"` in violet.
+- **Verified via curl**:
+  - keeper.a → A's products: 200 (1 product)
+  - keeper.b → A's products: 403 "Not allowed for this shop"
+  - keeper.a no shop_id: scoped to assigned shop only
+  - owner → unowned shop_id: 403 "Not your shop"
+  - owner no shop_id: scoped to owned shops only
+  - claim → confirm: success/paid + paid_at stamped
+  - re-confirm: 400 "Only orders awaiting manual confirmation can be confirmed"
+  - claim → reject (with reason): failed + reason persisted
+  - 2nd owner → confirm/reject: 403 "Not allowed"
+  - 2nd owner /api/orders & /api/products: empty (correct tenant isolation)
+- Untouched per spec: POS checkout logic, STK push, Paystack subscription.
+
 ## Session: Feb 2026 — UI reliability, contrast, mobile-first, PWA
 - Added `utils/imageUrl.js` — single resolver handling http/https, legacy
   `/static/*`, current `/api/static/*`, and relative paths. Uses

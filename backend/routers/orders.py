@@ -613,3 +613,82 @@ def update_order_status(
         {"$set": {"status": new_status, "status_updated_at": _dt.now(_tz.utc).isoformat()}},
     )
     return {"ok": True, "status": new_status}
+
+
+# =========================================================
+# ✅ OWNER — CONFIRM MANUAL M-PESA PAYMENT
+# Closes the loop on `mark-paid-manual` claims by letting the
+# shop owner verify they actually received the funds.
+# =========================================================
+@router.post("/{order_id}/confirm-payment")
+def confirm_payment(
+    order_id: str,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if user["role"] != "admin":
+        shop = db.shops.find_one({"_id": order.get("shop_id")})
+        if not shop or shop.get("owner_id") != user["_id"]:
+            raise HTTPException(status_code=403, detail="Not allowed")
+
+    if order.get("payment_status") != "pending_confirmation":
+        raise HTTPException(
+            status_code=400,
+            detail="Only orders awaiting manual confirmation can be confirmed",
+        )
+
+    now = _dt.now(_tz.utc).isoformat()
+    db.orders.update_one(
+        {"_id": order_id},
+        {"$set": {
+            "payment_status": "success",
+            "status": "paid",
+            "paid_at": now,
+            "manually_confirmed_by": user["_id"],
+            "manually_confirmed_at": now,
+        }},
+    )
+    return {"ok": True, "payment_status": "success", "status": "paid", "paid_at": now}
+
+
+# =========================================================
+# ❌ OWNER — REJECT MANUAL M-PESA PAYMENT
+# =========================================================
+@router.post("/{order_id}/reject-payment")
+def reject_payment(
+    order_id: str,
+    payload: dict = Body(default={}),
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    db = _get_db()
+    order = db.orders.find_one({"_id": order_id})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    if user["role"] != "admin":
+        shop = db.shops.find_one({"_id": order.get("shop_id")})
+        if not shop or shop.get("owner_id") != user["_id"]:
+            raise HTTPException(status_code=403, detail="Not allowed")
+
+    if order.get("payment_status") != "pending_confirmation":
+        raise HTTPException(
+            status_code=400,
+            detail="Only orders awaiting manual confirmation can be rejected",
+        )
+
+    now = _dt.now(_tz.utc).isoformat()
+    reason = (payload.get("reason") or "").strip() or None
+    db.orders.update_one(
+        {"_id": order_id},
+        {"$set": {
+            "payment_status": "failed",
+            "manually_rejected_by": user["_id"],
+            "manually_rejected_at": now,
+            "manual_rejection_reason": reason,
+        }},
+    )
+    return {"ok": True, "payment_status": "failed"}

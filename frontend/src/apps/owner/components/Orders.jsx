@@ -39,6 +39,29 @@ export default function Orders() {
     }
   };
 
+  const confirmPayment = async (orderId) => {
+    try {
+      await API.post(`/api/orders/${orderId}/confirm-payment`);
+      await load();
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Failed to confirm payment");
+    }
+  };
+
+  const rejectPayment = async (orderId) => {
+    const reason = window.prompt(
+      "Reject payment? Optional reason (e.g. 'No M-Pesa SMS received'):",
+      "",
+    );
+    if (reason === null) return; // user cancelled
+    try {
+      await API.post(`/api/orders/${orderId}/reject-payment`, { reason });
+      await load();
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Failed to reject payment");
+    }
+  };
+
   const formatKES = (n) => "KES " + Number(n || 0).toLocaleString();
 
   const statusBadge = (s) => {
@@ -65,7 +88,15 @@ export default function Orders() {
   };
 
   const paymentBadge = (s) => {
-    const colors = { pending: "#f59e0b", success: "#16a34a", failed: "#dc2626" };
+    const colors = {
+      pending: "#f59e0b",
+      pending_confirmation: "#7c3aed",
+      success: "#16a34a",
+      failed: "#dc2626",
+    };
+    const labels = {
+      pending_confirmation: "awaiting confirm",
+    };
     return (
       <span
         style={{
@@ -77,7 +108,7 @@ export default function Orders() {
           marginLeft: 6,
         }}
       >
-        💳 {s || "—"}
+        💳 {labels[s] || s || "—"}
       </span>
     );
   };
@@ -199,6 +230,26 @@ export default function Orders() {
 
           {/* Status actions */}
           <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            {o.payment_status === "pending_confirmation" && (
+              <>
+                <button
+                  onClick={() => confirmPayment(o._id)}
+                  style={actionBtn("#16a34a")}
+                  data-testid={`order-${o._id}-confirm-payment`}
+                  title="Mark this order as paid (M-Pesa received)"
+                >
+                  ✅ Confirm payment
+                </button>
+                <button
+                  onClick={() => rejectPayment(o._id)}
+                  style={actionBtn("#b91c1c")}
+                  data-testid={`order-${o._id}-reject-payment`}
+                  title="No payment received — mark as failed"
+                >
+                  ❌ Reject payment
+                </button>
+              </>
+            )}
             {o.status === "paid" && (
               <button
                 onClick={() => setStatus(o._id, "processing")}

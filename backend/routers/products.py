@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.db.mongo import get_db
-from backend.core.deps import require_roles
+from backend.core.deps import require_roles, get_assigned_shop_ids
 import uuid
 from datetime import datetime
 from fastapi import UploadFile, File, Form
@@ -22,9 +22,34 @@ def list_products(
     user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
+    role = user.get("role")
+
+    # 🔐 TENANT SCOPE — single source of truth per role.
+    if role == "shopkeeper":
+        assigned = get_assigned_shop_ids(user["_id"])
+        if not shop_id:
+            # No shop specified — list across all assigned shops only.
+            if not assigned:
+                return []
+            shop_filter = {"$in": assigned}
+        else:
+            if shop_id not in assigned:
+                raise HTTPException(status_code=403, detail="Not allowed for this shop")
+            shop_filter = shop_id
+    elif role in {"owner", "partner"}:
+        owned_ids = [s["_id"] for s in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})]
+        if shop_id:
+            if shop_id not in owned_ids:
+                raise HTTPException(status_code=403, detail="Not your shop")
+            shop_filter = shop_id
+        else:
+            shop_filter = {"$in": owned_ids} if owned_ids else {"$in": []}
+    else:  # admin
+        shop_filter = shop_id if shop_id else None
+
     filters = {}
-    if shop_id:
-        filters["shop_id"] = shop_id
+    if shop_filter is not None:
+        filters["shop_id"] = shop_filter
     if category_id:
         filters["category_id"] = category_id
     if category:
