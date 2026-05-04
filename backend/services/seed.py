@@ -49,6 +49,11 @@ def seed_full_data():
     for u in users:
         db.users.update_one({"email": u["email"]}, {"$setOnInsert": u}, upsert=True)
 
+    # Resolve actual user IDs (an existing user keeps its old _id on upsert).
+    owner_id = db.users.find_one({"email": "owner.seed@dukani.dev"})["_id"]
+    shopkeeper_a = db.users.find_one({"email": "keeper.a@dukani.dev"})["_id"]
+    shopkeeper_b = db.users.find_one({"email": "keeper.b@dukani.dev"})["_id"]
+
     shop_main = str(uuid.uuid4())
     shop_branch = str(uuid.uuid4())
     shops = [
@@ -65,6 +70,20 @@ def seed_full_data():
 
     db.users.update_one({"_id": shopkeeper_a}, {"$set": {"assigned_shop_ids": [shop_main]}})
     db.users.update_one({"_id": shopkeeper_b}, {"$set": {"assigned_shop_ids": [shop_branch]}})
+
+    # Canonical source of truth for shopkeeper -> shop linkage.
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    db.assignments.update_one(
+        {"shop_id": shop_main, "shopkeeper_id": shopkeeper_a},
+        {"$setOnInsert": {"shop_id": shop_main, "shopkeeper_id": shopkeeper_a, "owner_id": owner_id, "created_at": now}},
+        upsert=True,
+    )
+    db.assignments.update_one(
+        {"shop_id": shop_branch, "shopkeeper_id": shopkeeper_b},
+        {"$setOnInsert": {"shop_id": shop_branch, "shopkeeper_id": shopkeeper_b, "owner_id": owner_id, "created_at": now}},
+        upsert=True,
+    )
 
     products = [
         {"_id": str(uuid.uuid4()), "shop_id": shop_main, "name": "Seed Phone", "description": "", "price": 300, "stock": 10, "is_public": True, "barcode": "SP-001", "low_stock_threshold": 3},

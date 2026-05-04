@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.core.deps import require_roles
+from backend.core.deps import require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
 from datetime import datetime, timezone
 import uuid
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/credit-customers", tags=["credit"])
 def list_credit_customers(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()
     if user["role"] == "shopkeeper":
-        return list(db.credit_customers.find({"shop_id": {"$in": user.get("assigned_shop_ids", [])}}))
+        return list(db.credit_customers.find({"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}}))
     return list(db.credit_customers.find({}))
 @router.post("")
 def create_credit_customer(payload: dict, user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
@@ -29,7 +29,7 @@ def create_credit_customer(payload: dict, user=Depends(require_roles("owner", "a
 
     # 🛑 SECURITY FIX: shopkeeper must only use assigned shops
     if user["role"] == "shopkeeper":
-        assigned = user.get("assigned_shop_ids", [])
+        assigned = get_assigned_shop_ids(user["_id"])
         if shop_id not in assigned:
             raise HTTPException(status_code=403, detail="Not allowed for this shop")
 
@@ -58,7 +58,7 @@ def record_credit_payment(ledger_id: str, payload: dict, user=Depends(require_ro
     ledger = db.credit_customers.find_one({"_id": ledger_id})
     if not ledger:
         raise HTTPException(status_code=404, detail="Credit ledger not found")
-    if user["role"] == "shopkeeper" and ledger["shop_id"] not in user.get("assigned_shop_ids", []):
+    if user["role"] == "shopkeeper" and ledger["shop_id"] not in get_assigned_shop_ids(user["_id"]):
         raise HTTPException(status_code=403, detail="Shopkeeper not assigned")
 
     amount = float(payload.get("amount", 0))

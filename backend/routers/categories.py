@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.core.deps import require_roles
+from backend.core.deps import require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
 import uuid
 
@@ -17,7 +17,7 @@ def list_categories(
 
     # 🔒 keep security (optional now since categories are global)
     if user["role"] == "shopkeeper":
-        if shop_id and shop_id not in user.get("assigned_shop_ids", []):
+        if shop_id and shop_id not in get_assigned_shop_ids(user["_id"]):
             raise HTTPException(status_code=403, detail="Not allowed")
 
     # ✅ GLOBAL CATEGORIES (IMPORTANT FIX)

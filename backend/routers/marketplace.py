@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.core.deps import require_roles
+from backend.core.deps import require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
 
 router = APIRouter(prefix="/api/marketplace", tags=["marketplace"])
@@ -25,7 +25,7 @@ def list_vendors():
 def marketplace_orders(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()
     if user["role"] == "shopkeeper":
-        return list(db.orders.find({"shop_id": {"$in": user.get("assigned_shop_ids", [])}}))
+        return list(db.orders.find({"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}}))
     return list(db.orders.find({}))
 
 
@@ -35,7 +35,7 @@ def receive_marketplace_order(order_id: str, user=Depends(require_roles("owner",
     order = db.orders.find_one({"_id": order_id})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    if user["role"] == "shopkeeper" and order["shop_id"] not in user.get("assigned_shop_ids", []):
+    if user["role"] == "shopkeeper" and order["shop_id"] not in get_assigned_shop_ids(user["_id"]):
         raise HTTPException(status_code=403, detail="Shopkeeper not assigned")
     db.orders.update_one({"_id": order_id}, {"$set": {"status": "received"}})
     return db.orders.find_one({"_id": order_id})

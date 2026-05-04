@@ -178,6 +178,10 @@ def delete_shop(shop_id: str, user=Depends(require_roles("owner", "admin", "part
         raise HTTPException(status_code=403, detail="Not allowed")
 
     db.assignments.delete_many({"shop_id": shop_id})
+    db.users.update_many(
+        {"assigned_shop_ids": shop_id},
+        {"$pull": {"assigned_shop_ids": shop_id}},
+    )
     db.shops.delete_one({"_id": shop_id})
     db.subscriptions.delete_one({"shop_id": shop_id})
     return {"message": "Shop deleted successfully"}
@@ -255,6 +259,10 @@ def assign_shopkeeper(shop_id: str, shopkeeper_id: str, user=Depends(require_rol
     existing = db.assignments.find_one({"shop_id": shop_id, "shopkeeper_id": shopkeeper_id})
     if not existing:
         db.assignments.insert_one({"shop_id": shop_id, "shopkeeper_id": shopkeeper_id, "owner_id": shop["owner_id"], "created_at": datetime.utcnow().isoformat()})
+    db.users.update_one(
+        {"_id": shopkeeper_id},
+        {"$addToSet": {"assigned_shop_ids": shop_id}},
+    )
     return {"message": "Shopkeeper assigned"}
 
 
@@ -295,6 +303,10 @@ def unassign_shopkeeper(shop_id: str, shopkeeper_id: str, user=Depends(require_r
         raise HTTPException(status_code=403, detail="Not allowed")
 
     db.assignments.delete_one({"shop_id": shop_id, "shopkeeper_id": shopkeeper_id})
+    db.users.update_one(
+        {"_id": shopkeeper_id},
+        {"$pull": {"assigned_shop_ids": shop_id}},
+    )
     return {"message": "Shopkeeper unassigned successfully"}
 
 

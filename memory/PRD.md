@@ -300,6 +300,45 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
 - Verified via Playwright: countdown ticks 90 → 88s, status modal renders
   with correct copy, lookup returns real order IDs from DB.
 
+## Session: Feb 2026 — P0 Shopkeeper "Not assigned" checkout fix
+- **Root cause**: Two parallel sources of truth for shopkeeper → shop linkage.
+  Owner assign/unassign only wrote to the `assignments` collection, but
+  `pos.py:resolve_shop()`, `marketplace.py`, `credit.py`, `damaged_stock.py`,
+  `categories.py`, `credit_history.py`, `notifications.py` and the seed
+  function all read from `users.assigned_shop_ids` — which stayed empty,
+  producing "No shop assigned" / "Shopkeeper not assigned" 403s on every
+  POS checkout, credit op, marketplace order, etc.
+- **Fix**: Made `db.assignments` the canonical store.
+  - New helper `core/deps.get_assigned_shop_ids(user_id)` reads live from
+    the `assignments` collection.
+  - All seven readers above now call the helper instead of the stale user
+    field.
+  - `routers/auth.py:_user_response` resolves `assigned_shop_ids` from the
+    helper for shopkeepers so the frontend (POS shop picker, sidebar)
+    always reflects the latest owner action without re-login.
+  - Both `routers/assignments.py` and `routers/owner.py` assign/unassign
+    endpoints now `$addToSet`/`$pull` on `users.assigned_shop_ids` to keep
+    the denormalized cache in sync (defensive).
+  - `routers/owner.py:delete_shop` also `$pull`s the shop id from every
+    keeper's array.
+  - `services/seed.py` upserts users by email (correctly resolves the
+    real `_id` after upsert) and also writes the canonical `assignments`
+    rows — fixes seed run #2+ orphaning the assignments to a fresh UUID
+    that didn't match the existing keeper docs.
+  - Ran one-time backfill: 10/11 existing shopkeepers had drift, all
+    synced from `assignments` → `users.assigned_shop_ids`.
+- **Verified end-to-end via curl on the live preview URL**:
+  - `keeper.a@dukani.dev` login → `assigned_shop_ids` correctly populated.
+  - `GET /api/shop/my` returns "Seed Main Shop" only.
+  - `POST /api/orders/checkout` (cash) succeeds → receipt with order_id +
+    payment_status=confirmed.
+  - `keeper.b@dukani.dev` checkout into A's shop → `403 Not allowed`.
+- **Known follow-up (NOT touched per user instruction to verify P0 first)**:
+  - `GET /api/products?shop_id=X` is not scoped to the caller's
+    assignments/ownership. Shopkeeper B can read shopkeeper A's products
+    via direct shop_id query (read-only — checkout still blocks). Should
+    be tightened in the next tenant-isolation sweep.
+
 ## Session: Feb 2026 — UI reliability, contrast, mobile-first, PWA
 - Added `utils/imageUrl.js` — single resolver handling http/https, legacy
   `/static/*`, current `/api/static/*`, and relative paths. Uses

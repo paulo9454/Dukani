@@ -24,6 +24,11 @@ def assign_shopkeeper(shop_id: str, user_id: str, user=Depends(require_roles("ow
         return {"message": "Already assigned"}
 
     db.assignments.insert_one({"shop_id": shop_id, "shopkeeper_id": user_id, "owner_id": shop["owner_id"], "created_at": datetime.utcnow().isoformat()})
+    # Keep denormalized user-doc cache in sync for legacy readers + frontend.
+    db.users.update_one(
+        {"_id": user_id},
+        {"$addToSet": {"assigned_shop_ids": shop_id}},
+    )
     return {"message": "Assigned successfully"}
 
 
@@ -37,4 +42,8 @@ def unassign_shopkeeper(shop_id: str, user_id: str, user=Depends(require_roles("
         raise HTTPException(status_code=404, detail="Shop not found")
 
     db.assignments.delete_one({"shop_id": shop_id, "shopkeeper_id": user_id})
+    db.users.update_one(
+        {"_id": user_id},
+        {"$pull": {"assigned_shop_ids": shop_id}},
+    )
     return {"message": "Unassigned"}

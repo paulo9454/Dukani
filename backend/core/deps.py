@@ -73,6 +73,22 @@ def require_roles(*roles):
 # 🧠 TENANT HELPERS (NEW CORE FIX)
 # =========================
 
+def get_assigned_shop_ids(user_id: str) -> list[str]:
+    """Single source of truth for shopkeeper -> shop assignments.
+
+    Always reads from the `assignments` collection so a shopkeeper's
+    permissions reflect the latest owner action without re-issuing the
+    JWT or refetching the user doc.
+    """
+    db = get_db()
+    return [
+        a["shop_id"]
+        for a in db.assignments.find(
+            {"shopkeeper_id": user_id}, {"_id": 0, "shop_id": 1}
+        )
+    ]
+
+
 def is_shop_owner(shop, user):
     return user["role"] == "admin" or shop["owner_id"] == user["_id"]
 

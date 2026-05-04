@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
-from backend.core.deps import get_current_user, require_roles
+from backend.core.deps import get_current_user, require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
 from backend.schemas.order import POSCheckoutRequest
 from backend.services.checkout import checkout_pos
@@ -50,7 +50,10 @@ def resolve_shop(user: dict, shop_id: str | None):
     role = user.get("role")
 
     if role == "shopkeeper":
-        assigned = user.get("assigned_shop_ids", [])
+        # Single source of truth: the assignments collection. The user
+        # document's `assigned_shop_ids` is a denormalized cache and may
+        # be stale right after an owner assigns the shopkeeper.
+        assigned = get_assigned_shop_ids(user["_id"])
 
         if not assigned:
             raise HTTPException(status_code=403, detail="No shop assigned")

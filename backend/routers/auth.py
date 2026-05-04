@@ -23,12 +23,20 @@ def _gen_code() -> str:
 
 
 def _user_response(user: dict) -> dict:
+    # Resolve `assigned_shop_ids` from the canonical `assignments` collection
+    # for shopkeepers so the frontend sidebar / POS shop picker always
+    # reflects the latest owner action without re-login.
+    assigned = user.get("assigned_shop_ids", []) or []
+    if user.get("role") == "shopkeeper":
+        from backend.core.deps import get_assigned_shop_ids
+        assigned = get_assigned_shop_ids(user["_id"])
+
     return {
         "id": user["_id"],
         "email": user.get("email"),
         "name": user.get("full_name"),
         "role": user.get("role"),
-        "assigned_shop_ids": user.get("assigned_shop_ids", []),
+        "assigned_shop_ids": assigned,
         "subscription_status": user.get("subscription_status", "active"),
         "is_verified": user.get("is_verified", True),
         "is_active": user.get("is_active", True),
