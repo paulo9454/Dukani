@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import API from "../../api/client";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 import ProductImage from "../../components/ProductImage";
+import CreditorsPanel from "../../components/CreditorsPanel";
 import "../../receipt.css";
 
 function PosApp({ user, shopId }) {
@@ -35,6 +36,7 @@ const [newCreditor, setNewCreditor] = useState({
   credit_limit: ""
 });
 const [cashReceived, setCashReceived] = useState("");
+const [creditorsOpen, setCreditorsOpen] = useState(false);
 
   useEffect(() => {
     if (assignedShopId) setActiveShopId(assignedShopId);
@@ -341,7 +343,7 @@ useEffect(() => {
           Shop: {activeShopId}
         </p>
 
-        <div style={{ marginBottom: 10, display: "flex", gap: 8 }}>
+        <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
             onClick={() => setPriceMode("retail")}
             data-variant={priceMode === "retail" ? "primary" : undefined}
@@ -355,6 +357,22 @@ useEffect(() => {
             data-testid="pos-price-mode-wholesale"
           >
             Wholesale
+          </button>
+          <button
+            onClick={() => setCreditorsOpen(true)}
+            data-testid="pos-open-creditors"
+            style={{
+              marginLeft: "auto",
+              padding: "8px 14px",
+              background: "#0f172a",
+              color: "#fff",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            💳 Creditors
           </button>
         </div>
 
@@ -787,6 +805,45 @@ useEffect(() => {
   data={lastReceipt}
   onClose={() => setLastReceipt(null)}
 />
+
+      {creditorsOpen && (
+        <div
+          data-testid="pos-creditors-modal"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15,23,42,0.55)",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            padding: 16,
+            zIndex: 1000,
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setCreditorsOpen(false);
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              width: "min(720px, 100%)",
+              maxHeight: "90vh",
+              overflow: "auto",
+              borderRadius: 14,
+              padding: 18,
+              boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+            }}
+          >
+            <CreditorsPanel
+              shopId={activeShopId}
+              onClose={() => {
+                setCreditorsOpen(false);
+                loadCreditors();
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

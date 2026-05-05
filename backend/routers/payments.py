@@ -697,6 +697,35 @@ def mpesa_callback(payload: dict = Body(...)):
         upsert=True,
     )
     _mark_order_payment((record or {}).get("order_id"), status, "mpesa", "mpesa")
+
+    # 💳 If this STK was a credit-ledger settlement, decrement the balance.
+    if status == "success" and (record or {}).get("payment_type") == "credit_settlement":
+        ledger_id = record.get("credit_ledger_id")
+        amt = float(record.get("amount") or 0)
+        if ledger_id and amt > 0:
+            ledger = db.credit_customers.find_one({"_id": ledger_id})
+            if ledger:
+                new_balance = max(round(ledger.get("balance", 0) - amt, 2), 0)
+                db.credit_customers.update_one(
+                    {"_id": ledger_id},
+                    {"$set": {"balance": new_balance}},
+                )
+                db.credit_payments_history.insert_one({
+                    "_id": str(uuid.uuid4()),
+                    "ledger_id": ledger_id,
+                    "customer_id": ledger.get("customer_id"),
+                    "shop_id": ledger.get("shop_id"),
+                    "amount": amt,
+                    "method": "mpesa_stk",
+                    "type": "credit_payment",
+                    "reference": ref,
+                    "created_at": _now_iso(),
+                })
+                logger.info(
+                    "credit ledger=%s reduced by %.2f via stk ref=%s, new_balance=%.2f",
+                    ledger_id, amt, ref, new_balance,
+                )
+
     logger.info("mpesa callback ref=%s status=%s order=%s", ref, status, (record or {}).get("order_id"))
     return {"ResultCode": 0, "ResultDesc": "Accepted"}
 

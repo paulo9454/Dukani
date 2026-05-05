@@ -1,6 +1,43 @@
 # Dukani – PRD (Deployment Setup on Emergent)
 
 ## Original Problem Statement
+
+## Session: Feb 2026 — Three-pack: online recovery, creditor module, self-heal
+- **#1 — Stuck "shop unavailable" recovery** (production issue): a paying
+  client's shop link kept saying "this shop is not currently selling
+  online" even after Paystack confirmed and the owner panel showed online
+  enabled. Two-pronged fix:
+  - `routers/public.py:_online_eligible` now also consults the
+    `subscriptions` collection (paid + pos_online) as a final fallback,
+    AND **self-heals** the shop document so the next request hits the
+    fast path. No more dark storefronts when activation drift happens.
+  - New `POST /api/owner/shops/{shop_id}/recover-activation` endpoint.
+    Owner can paste a Paystack reference (or leave blank to auto-find
+    their latest paid pos_online subscription) to re-run idempotent
+    activation. Hard-blocks repurposing another shop's payment with
+    `403 Not allowed`.
+  - Frontend "🛟 Already paid? Recover" button on every shop card.
+- **#2 — Creditor module** (POS + Owner panel + Shopkeeper):
+  - New reusable `CreditorsPanel` component used in:
+    - Owner sidebar tab `💳 Creditors` (cross-shop list with shop filter).
+    - POS `💳 Creditors` button → modal with shop-scoped list.
+  - List shows name, phone, credit limit, balance, total outstanding.
+  - Two actions per row:
+    - **💵 Cash paid** — `POST /api/credit-customers/{id}/payment` with
+      `method=cash`, instantly reduces balance.
+    - **📲 Send M-Pesa** — `POST /api/credit-customers/{id}/payment-stk` →
+      Daraja STK to customer phone → balance auto-reduces on callback
+      success (callback handler now decrements via the new
+      `payment_type=credit_settlement` + `credit_ledger_id` link).
+  - `GET /api/credit-customers/{id}/history` returns last 50 events.
+- **#3 — Owner-without-shopkeeper sales**: already supported in
+  `pos.py:resolve_shop()` — owner role passes any owned shop_id with no
+  assignment check. Verified, no code change needed.
+- Verified end-to-end with curl: recover w/o payment (404 helpful),
+  recover w/ valid ref (activated + plan flipped), public-shop self-heal
+  (200 + shop doc auto-fix), credit cash payment (balance -500), credit
+  STK callback success (balance -1000, method=mpesa_stk).
+
 "i want to deploy the app dukani here get it from github" — GitHub: `paulo9454/Dukani` (main branch).
 User also supplied a deep audit blueprint describing Dukani as a multi-role commerce platform (FastAPI + React/Vite + MongoDB) covering owner, shopkeeper, customer, POS, marketplace, inventory, credit, suppliers, notifications, subscriptions, etc.
 

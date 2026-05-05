@@ -34,8 +34,33 @@ def _online_eligible(shop: dict) -> bool:
     plan = shop.get("subscription_plan")
     if plan in ONLINE_PLANS:
         return True
-    # legacy flag still respected
-    return bool(shop.get("is_online_enabled") or shop.get("online_enabled"))
+    if shop.get("is_online_enabled") or shop.get("online_enabled"):
+        return True
+    # 🛟 Fallback: a paid pos_online subscription exists for this shop
+    # (covers the case where activation flipped the subscription record but
+    # the denormalized shop doc fields drifted — saves the storefront from
+    # going dark when Paystack succeeded but the post-charge update was
+    # partial).
+    try:
+        db = get_db()
+        sub = db.subscriptions.find_one(
+            {"shop_id": shop.get("_id"), "is_paid": True, "plan": "pos_online"},
+            {"_id": 0, "plan": 1, "is_paid": 1},
+        )
+        if sub:
+            # Self-heal the shop doc so the next request hits the fast path.
+            db.shops.update_one(
+                {"_id": shop["_id"]},
+                {"$set": {
+                    "subscription_plan": "pos_online",
+                    "online_enabled": True,
+                    "is_online_enabled": True,
+                }},
+            )
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def _ensure_slug(db, shop: dict) -> str:

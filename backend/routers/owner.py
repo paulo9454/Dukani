@@ -168,6 +168,102 @@ def subscribe_shop(
     }
 
 
+# =========================================================
+# 🛟 OWNER — RECOVER STUCK ONLINE ACTIVATION
+# Used when a shop owner says "I paid but my shop link still
+# says 'not currently selling online'". Verifies the latest
+# successful Paystack subscription payment for the shop and
+# re-runs activation. Optionally accepts an explicit Paystack
+# reference for surgical recovery.
+# =========================================================
+@router.post("/shops/{shop_id}/recover-activation")
+def recover_activation(
+    shop_id: str,
+    payload: dict = Body(default={}),
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    from backend.routers.payments import _activate_subscription, paystack_verify
+
+    db = get_db()
+    shop = db.shops.find_one({"_id": shop_id})
+    if not shop:
+        raise HTTPException(status_code=404, detail="Shop not found")
+    if not _is_owner_scope(user, shop):
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    reference = (payload.get("paystack_reference") or "").strip() or None
+
+    # 1. Pick the candidate payment record.
+    candidate = None
+    if reference:
+        candidate = db.payments.find_one({"reference": reference, "shop_id": shop_id})
+        if not candidate:
+            # Maybe the reference matches but shop_id wasn't persisted on the
+            # payment row — accept it anyway if status is success.
+            candidate = db.payments.find_one({"reference": reference})
+    else:
+        candidate = db.payments.find_one(
+            {
+                "shop_id": shop_id,
+                "provider": "paystack",
+                "subscription_plan": "pos_online",
+                "status": "success",
+            },
+            sort=[("created_at", -1)],
+        )
+
+    # 2. If no record, hit Paystack verify directly when a reference was given.
+    if not candidate and reference:
+        try:
+            verified = paystack_verify(reference=reference, payload=None, user=user)
+        except Exception:
+            verified = None
+        if verified and verified.get("verified"):
+            # paystack_verify upserts a payment row already; refetch & patch
+            # missing shop/plan metadata so _activate_subscription can run.
+            candidate = db.payments.find_one({"reference": reference})
+            if candidate:
+                patch = {}
+                if not candidate.get("shop_id"):
+                    patch["shop_id"] = shop_id
+                if not candidate.get("subscription_plan"):
+                    patch["subscription_plan"] = "pos_online"
+                if patch:
+                    db.payments.update_one(
+                        {"reference": reference},
+                        {"$set": patch},
+                    )
+                    candidate.update(patch)
+
+    if not candidate:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "No matching Paystack payment found for this shop. "
+                "Double-check the reference, or contact support."
+            ),
+        )
+
+    # 🔒 Security: refuse to repurpose another shop's payment.
+    cand_shop = candidate.get("shop_id")
+    if cand_shop and cand_shop != shop_id:
+        raise HTTPException(
+            status_code=403,
+            detail="That Paystack reference belongs to a different shop.",
+        )
+
+    # 3. Force activation idempotently.
+    activated = _activate_subscription(candidate)
+    refreshed = db.shops.find_one({"_id": shop_id}) or {}
+    return {
+        "activated": bool(activated),
+        "subscription_plan": refreshed.get("subscription_plan"),
+        "online_enabled": bool(refreshed.get("online_enabled")),
+        "reference": candidate.get("reference"),
+        "amount": candidate.get("amount"),
+    }
+
+
 @router.delete("/shops/{shop_id}")
 def delete_shop(shop_id: str, user=Depends(require_roles("owner", "admin", "partner"))):
     db = get_db()

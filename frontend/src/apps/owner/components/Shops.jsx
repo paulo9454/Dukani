@@ -246,6 +246,30 @@ function Shops({ search = "" }) {
               toast("Opening WhatsApp…");
             };
 
+            const recoverActivation = async () => {
+              const ref = window.prompt(
+                "Already paid via Paystack but the link still says 'shop unavailable'?\n\nPaste the Paystack reference (or leave blank to auto-find your latest paid subscription):",
+                "",
+              );
+              if (ref === null) return;
+              try {
+                const res = await API.post(
+                  `/api/owner/shops/${shop._id}/recover-activation`,
+                  { paystack_reference: (ref || "").trim() || undefined },
+                );
+                if (res.data?.activated) {
+                  toast("✅ Online activation recovered.", { variant: "success" });
+                } else {
+                  toast("Activation already in place.", { variant: "success" });
+                }
+                await loadShops();
+              } catch (err) {
+                toast(
+                  err?.response?.data?.detail || "Could not recover activation",
+                );
+              }
+            };
+
             return (
               <div
                 key={shop._id}
@@ -336,6 +360,23 @@ function Shops({ search = "" }) {
                         🌐 Activate Online Store
                       </button>
                     )}
+                    <button
+                      data-testid={`recover-activation-${shop._id}`}
+                      onClick={recoverActivation}
+                      title="Already paid? Re-run activation against your Paystack receipt"
+                      style={{
+                        background: "transparent",
+                        color: "#0f766e",
+                        border: "1px dashed #0f766e",
+                        padding: "6px 10px",
+                        cursor: "pointer",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      🛟 Already paid? Recover
+                    </button>
                     <button
                       onClick={() => (window.location.href = `/pos?shopId=${shop._id}`)}
                       style={{
