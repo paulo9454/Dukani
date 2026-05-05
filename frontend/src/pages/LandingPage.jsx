@@ -1,4 +1,3 @@
-import { useState } from "react";
 import ProductImage from "../components/ProductImage";
 import InstallButton from "../components/InstallButton";
 
@@ -59,57 +58,18 @@ export default function LandingPage() {
         </p>
       </section>
 
-      {/* ═══ 2. Live shop preview ═══ */}
-      <section style={previewSection}>
-        <div style={browserFrame}>
-          <div style={browserBar}>
-            <span style={dot("#ef4444")} />
-            <span style={dot("#f59e0b")} />
-            <span style={dot("#22c55e")} />
-            <div style={urlBar}>dukayko.com/shop/mkenya-shop</div>
-          </div>
+      {/* ═══ 2. Dual showcase — POS + Online ═══ */}
+      <section style={dualSection}>
+        <h2 style={dualH2}>Run your shop. Sell online.</h2>
+        <p style={dualSub}>
+          Use Dukayko to record sales in your shop and let customers order
+          online — all in one place.
+        </p>
 
-          <div style={shopBody}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h3 style={{ margin: 0, color: "#0f172a", fontSize: 18 }}>
-                Mkenya Shop
-              </h3>
-              <div style={{ color: "#475569", fontSize: 12, marginBottom: 12 }}>
-                📂 Groceries · 📍 Nairobi
-              </div>
-
-              <div style={productGrid}>
-                {DEMO_PRODUCTS.map((p) => (
-                  <DemoProductCard key={p.name} p={p} />
-                ))}
-              </div>
-            </div>
-
-            <aside style={cartCard}>
-              <div style={{ fontWeight: 700, color: "#0f172a" }}>
-                🛒 Cart&nbsp;(2)
-              </div>
-              <div style={{ fontSize: 13, color: "#334155", marginTop: 6 }}>
-                1 × Bread · KES 60
-                <br />1 × Blue Band · KES 180
-              </div>
-              <div
-                style={{
-                  marginTop: 10,
-                  paddingTop: 10,
-                  borderTop: "1px dashed #cbd5e1",
-                  fontWeight: 700,
-                  color: "#0f172a",
-                  display: "flex",
-                  justifyContent: "space-between",
-                }}
-              >
-                <span>Total</span>
-                <span>KES 240</span>
-              </div>
-              <div style={fakeMpesaBtn}>🟢 Pay with M-Pesa</div>
-            </aside>
-          </div>
+        <div style={dualGrid}>
+          {DEMO_SHOPS.map((shop) => (
+            <DualShopCard key={shop.slug} shop={shop} />
+          ))}
         </div>
       </section>
 
@@ -205,64 +165,128 @@ export default function LandingPage() {
 }
 
 // ============================================================
-// Demo product card — standalone so the landing page has zero
-// dependency on owner-side stores / data.
+// Dual shop card — POS view (left) + Online view (right)
 // ============================================================
-function DemoProductCard({ p }) {
-  const [added, setAdded] = useState(false);
+function DualShopCard({ shop }) {
   return (
-    <div style={productCard}>
-      <ProductImage src={p.image} alt={p.name} height={90} />
-      <div style={{ fontWeight: 700, color: "#0f172a", fontSize: 14, marginTop: 6 }}>
-        {p.name}
-      </div>
-      <div style={{ color: "#15803d", fontWeight: 700, fontSize: 13 }}>
-        KES {p.price}
-      </div>
-      <button
-        onClick={() => setAdded((a) => !a)}
-        style={{
-          marginTop: 6,
-          width: "100%",
-          padding: "8px 10px",
-          minHeight: 38,
-          background: added ? "#dcfce7" : "#16a34a",
-          color: added ? "#15803d" : "#fff",
-          border: "none",
-          borderRadius: 8,
-          fontWeight: 700,
-          fontSize: 13,
-          cursor: "pointer",
-          transition: "background 120ms ease, color 120ms ease",
-        }}
-      >
-        {added ? "✓ Added" : "+ Add to cart"}
-      </button>
-    </div>
+    <article style={dualCard} data-testid={`demo-shop-${shop.slug}`}>
+      {/* Shop header */}
+      <header style={dualCardHeader}>
+        <div>
+          <div style={dualCardCategory}>{shop.category}</div>
+          <h3 style={dualCardName}>{shop.name}</h3>
+        </div>
+        <a
+          href={`/shop/${shop.slug}`}
+          target="_blank"
+          rel="noreferrer"
+          style={dualCardCta}
+          data-testid={`demo-shop-${shop.slug}-cta`}
+        >
+          View shop&nbsp;→
+        </a>
+      </header>
+
+      <p style={dualCardSupport}>{shop.support}</p>
+
+      {/* Online customer view */}
+      <section style={onlinePanel} aria-label={`${shop.name} online customer view`}>
+        <div style={panelLabel}>
+          <span style={panelLabelDot("#16a34a")} /> Online (customer view)
+        </div>
+        <div style={onlineScreen}>
+          <div style={onlineUrlBar}>dukayko.com/shop/{shop.slug}</div>
+          <div style={onlineGrid}>
+            {shop.products.map((p) => (
+              <div key={p.name} style={onlineProductCard}>
+                <div style={onlineImageWrap}>
+                  <ProductImage src={p.image} alt={p.name} height={120} loading="eager" />
+                </div>
+                <div style={onlineProductName}>{p.name}</div>
+                <div style={onlineProductPrice}>
+                  KES {p.price.toLocaleString()}
+                </div>
+                <button type="button" style={onlineAddBtn}>
+                  + Add to cart
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </article>
   );
 }
 
 // ============================================================
 // Data
 // ============================================================
-const DEMO_PRODUCTS = [
+const DEMO_SHOPS = [
   {
-    name: "Bread",
-    price: 60,
-    image:
-      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/f9nb6m43_bread.webp",
+    slug: "electro-mart",
+    name: "ElectroMart Kenya",
+    category: "📺 Electronics · Nairobi CBD",
+    support:
+      "Customers browse and order online — no app, no friction.",
+    products: [
+      {
+        name: 'GLD 32" LED TV',
+        price: 16500,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/qjqqenkw_tv.jpg",
+      },
+      {
+        name: 'GLD 43" Smart TV',
+        price: 24500,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/zpnv0h81_gld%20tv.jpg",
+      },
+      {
+        name: 'GLD 50" Android TV',
+        price: 39999,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/hldmm6yj_2.jpg",
+      },
+    ],
   },
   {
-    name: "Milk 1L",
-    price: 90,
-    image:
-      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/ugn04rpi_milk.webp",
-  },
-  {
-    name: "Blue Band",
-    price: 180,
-    image:
-      "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/rm5npbiy_blueband.webp",
+    slug: "urban-heels",
+    name: "Urban Heels & Fashion",
+    category: "👜 Ladies Fashion · Westlands",
+    support: "Open a beautiful online store — share the link, take orders.",
+    products: [
+      {
+        name: "Rose Embroidered Sneakers",
+        price: 2500,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/v4noxurf_1%20%282%29.jpg",
+      },
+      {
+        name: "Brown Suede Loafers",
+        price: 3200,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/xpv0shlk_1%20%283%29.jpg",
+      },
+      {
+        name: "Black Leather Backpack",
+        price: 1800,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/n08geygr_1%20%286%29.jpg",
+      },
+      {
+        name: "Canvas Messenger Bag",
+        price: 1200,
+        qty: 1,
+        image:
+          "https://customer-assets.emergentagent.com/job_dukani-store/artifacts/5q3y7rlf_1%20%287%29.jpg",
+      },
+    ],
   },
 ];
 
@@ -385,97 +409,183 @@ const helper = {
   fontSize: 13,
 };
 
-// ── Live shop preview ──
-const previewSection = {
-  maxWidth: 1080,
-  margin: "24px auto 64px",
+// ── Dual-shop showcase (POS + Online) ──
+const dualSection = {
+  maxWidth: 1200,
+  margin: "16px auto 56px",
   padding: "0 20px",
 };
 
-const browserFrame = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 16,
-  overflow: "hidden",
-  background: "#fff",
-  boxShadow: "0 30px 70px rgba(15,23,42,0.12)",
+const dualH2 = {
+  fontSize: "clamp(26px, 4.2vw, 38px)",
+  fontWeight: 800,
+  letterSpacing: "-0.02em",
+  textAlign: "center",
+  margin: "0 auto 8px",
+  color: "#0f172a",
+  maxWidth: 720,
+  lineHeight: 1.1,
 };
 
-const browserBar = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-  padding: "10px 12px",
-  background: "#f8fafc",
-  borderBottom: "1px solid #e2e8f0",
-};
-
-const dot = (color) => ({
-  width: 10,
-  height: 10,
-  borderRadius: "50%",
-  background: color,
-  display: "inline-block",
-});
-
-const urlBar = {
-  marginLeft: 12,
-  flex: 1,
-  background: "#fff",
-  border: "1px solid #e2e8f0",
-  borderRadius: 8,
-  padding: "4px 10px",
-  fontSize: 12,
+const dualSub = {
+  textAlign: "center",
   color: "#475569",
+  fontSize: "clamp(14px, 1.6vw, 17px)",
+  margin: "0 auto 36px",
+  maxWidth: 620,
+  lineHeight: 1.55,
 };
 
-const shopBody = {
+const dualGrid = {
+  display: "grid",
+  gridTemplateColumns: "1fr",
+  gap: 28,
+};
+
+const dualCard = {
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 20,
+  padding: "24px clamp(16px, 3vw, 28px)",
+  boxShadow: "0 18px 40px rgba(15,23,42,0.06)",
+  transition: "transform 200ms ease, box-shadow 200ms ease",
+};
+
+const dualCardHeader = {
   display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
   gap: 16,
-  padding: 16,
   flexWrap: "wrap",
 };
 
-const productGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
-  gap: 10,
+const dualCardCategory = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#16a34a",
+  letterSpacing: 0.2,
+  marginBottom: 4,
 };
 
-const productCard = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 12,
-  padding: 10,
-  background: "#fff",
+const dualCardName = {
+  margin: 0,
+  fontSize: "clamp(20px, 2.4vw, 26px)",
+  fontWeight: 800,
+  color: "#0f172a",
+  letterSpacing: "-0.01em",
 };
 
-const productImg = {
-  width: "100%",
-  height: 90,
-  borderRadius: 8,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-};
-
-const cartCard = {
-  flex: "0 0 220px",
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
-  borderRadius: 12,
-  padding: 14,
-  alignSelf: "flex-start",
-  minWidth: 180,
-};
-
-const fakeMpesaBtn = {
-  marginTop: 12,
-  padding: "10px 12px",
-  background: "#16a34a",
+const dualCardCta = {
+  alignSelf: "center",
+  padding: "10px 18px",
+  background: "#0f172a",
   color: "#fff",
-  borderRadius: 8,
-  textAlign: "center",
+  borderRadius: 999,
+  textDecoration: "none",
   fontWeight: 700,
   fontSize: 13,
+  whiteSpace: "nowrap",
+  transition: "transform 120ms ease, background 120ms ease",
+};
+
+const dualCardSupport = {
+  margin: "10px 0 22px",
+  color: "#475569",
+  fontSize: 14,
+};
+
+const panelLabel = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 12,
+  fontWeight: 700,
+  color: "#334155",
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  marginBottom: 10,
+};
+
+const panelLabelDot = (color) => ({
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  background: color,
+});
+
+// Online panel
+const onlinePanel = {
+  display: "flex",
+  flexDirection: "column",
+};
+
+const onlineScreen = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: 14,
+  padding: 14,
+  flex: 1,
+};
+
+const onlineUrlBar = {
+  fontSize: 11,
+  color: "#64748b",
+  background: "#fff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  padding: "5px 10px",
+  marginBottom: 12,
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+};
+
+const onlineGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: 14,
+};
+
+const onlineProductCard = {
+  background: "#fff",
+  border: "1px solid #e2e8f0",
+  borderRadius: 10,
+  padding: 8,
+  display: "flex",
+  flexDirection: "column",
+};
+
+const onlineImageWrap = {
+  borderRadius: 8,
+  overflow: "hidden",
+  marginBottom: 6,
+  background: "#f1f5f9",
+};
+
+const onlineProductName = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "#0f172a",
+  lineHeight: 1.3,
+  minHeight: 32,
+  whiteSpace: "normal",
+};
+
+const onlineProductPrice = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#15803d",
+  margin: "4px 0 6px",
+};
+
+const onlineAddBtn = {
+  marginTop: "auto",
+  padding: "6px 8px",
+  background: "#16a34a",
+  color: "#fff",
+  border: "none",
+  borderRadius: 6,
+  fontWeight: 700,
+  fontSize: 11,
+  cursor: "pointer",
 };
 
 // ── Section generic ──

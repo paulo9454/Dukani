@@ -372,7 +372,33 @@ User also supplied a deep audit blueprint describing Dukani as a multi-role comm
   - claim → reject (with reason): failed + reason persisted
   - 2nd owner → confirm/reject: 403 "Not allowed"
   - 2nd owner /api/orders & /api/products: empty (correct tenant isolation)
-- Untouched per spec: POS checkout logic, STK push, Paystack subscription.
+## Session: Feb 2026 — Landing page dual-shop POS + Online showcase
+- Replaced the single Mkenya Shop browser-frame preview with a new
+  "Run your shop. Sell online." section that visually proves Dukayko is
+  both a POS and an online storefront in one product.
+- New `DualShopCard` component renders two side-by-side panels per shop:
+  - **Left (POS view)**: dark cashier panel with line-item rows, qty
+    column, KES total, and Cash + M-Pesa Charge buttons.
+  - **Right (Online customer view)**: light panel with a faux URL bar
+    (`dukayko.com/shop/{slug}`), 2x2 product grid with photos, prices,
+    and Add to cart buttons.
+- On mobile the panels auto-stack (POS first, then Online) via
+  `grid-template-columns: repeat(auto-fit, minmax(280px, 1fr))`.
+- Two demo shops, each with its own product set, supporting copy, and
+  CTA to `/shop/{slug}`:
+  1. **ElectroMart Kenya** (Electronics · Nairobi CBD) — Samsung 43" Smart
+     TV, LG 32" LED TV, Sony Home Theatre, Extension Cable. Photos sourced
+     from Pexels CDN (verified browser-loadable; Unsplash was blocking the
+     iframe).
+  2. **Urban Heels & Fashion** (Ladies Fashion · Westlands) — uses the
+     four user-uploaded product photos (Rose Embroidered Sneakers,
+     Brown Suede Loafers, Black Leather Backpack, Canvas Messenger Bag).
+- Added a `loading="eager"` prop on `ProductImage` so prominent
+  above-the-fold demos don't sit in IntersectionObserver lazy-load
+  purgatory.
+- Test IDs added: `demo-shop-electro-mart`, `demo-shop-urban-heels`,
+  and `demo-shop-{slug}-cta` per spec.
+- Backend, checkout, payments untouched per spec.
 
 ## Session: Feb 2026 — Deploy hardening (root cause: misconfigured env var)
 - **Root cause of deploy crash** (`ValueError: invalid literal for int() with

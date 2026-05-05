@@ -19,6 +19,7 @@ export default function ProductImage({
   style = {},
   className = "",
   testId,
+  loading = "lazy",
 }) {
   const resolved = product ? productImage(product) : resolveImageUrl(src);
   const [status, setStatus] = useState(resolved ? "loading" : "none");
@@ -84,7 +85,7 @@ export default function ProductImage({
         ref={imgRef}
         src={resolved}
         alt={alt}
-        loading="lazy"
+        loading={loading}
         decoding="async"
         onLoad={() => setStatus("loaded")}
         onError={() => setStatus("error")}
