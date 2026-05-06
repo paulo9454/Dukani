@@ -56,15 +56,38 @@ def seed_full_data():
 
     shop_main = str(uuid.uuid4())
     shop_branch = str(uuid.uuid4())
+    from datetime import datetime, timezone, timedelta
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
+    trial_end = (now_dt + timedelta(days=30)).isoformat()
     shops = [
-        {"_id": shop_main, "name": "Seed Main Shop", "owner_id": owner_id, "subscription_plan": "online"},
-        {"_id": shop_branch, "name": "Seed Branch Shop", "owner_id": owner_id, "subscription_plan": "online"},
+        {
+            "_id": shop_main, "name": "Seed Main Shop", "owner_id": owner_id,
+            "subscription_plan": "pos_online",
+            "online_enabled": True, "is_online_enabled": True, "pos_enabled": True,
+            "subscription_status": "active",
+            "trial_start_at": now, "trial_end_at": trial_end,
+        },
+        {
+            "_id": shop_branch, "name": "Seed Branch Shop", "owner_id": owner_id,
+            "subscription_plan": "pos_online",
+            "online_enabled": True, "is_online_enabled": True, "pos_enabled": True,
+            "subscription_status": "active",
+            "trial_start_at": now, "trial_end_at": trial_end,
+        },
     ]
     for s in shops:
         db.shops.update_one({"_id": s["_id"]}, {"$set": s}, upsert=True)
         db.subscriptions.update_one(
             {"shop_id": s["_id"]},
-            {"$set": {"shop_id": s["_id"], "plan": "online", "status": "active", "_id": str(uuid.uuid4())}},
+            {"$set": {
+                "shop_id": s["_id"],
+                "plan": "pos_online",
+                "status": "active",
+                "is_paid": True,
+                "trial_start": now,
+                "trial_end": trial_end,
+            }},
             upsert=True,
         )
 
@@ -72,8 +95,6 @@ def seed_full_data():
     db.users.update_one({"_id": shopkeeper_b}, {"$set": {"assigned_shop_ids": [shop_branch]}})
 
     # Canonical source of truth for shopkeeper -> shop linkage.
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc).isoformat()
     db.assignments.update_one(
         {"shop_id": shop_main, "shopkeeper_id": shopkeeper_a},
         {"$setOnInsert": {"shop_id": shop_main, "shopkeeper_id": shopkeeper_a, "owner_id": owner_id, "created_at": now}},

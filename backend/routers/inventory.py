@@ -1,6 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.db.mongo import get_db
-from backend.core.deps import get_current_user, require_roles
+from backend.core.deps import (
+    get_current_user,
+    require_roles,
+    assert_shop_access,
+    get_owned_shop_ids,
+    get_assigned_shop_ids,
+)
 from datetime import datetime, timezone
 import uuid
 
@@ -20,9 +26,10 @@ def now():
 @router.get("/shop/{shop_id}")
 def get_inventory(
     shop_id: str,
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
+    assert_shop_access(user, shop_id)
 
     shop = db.shops.find_one({"_id": shop_id})
     if not shop:
@@ -44,9 +51,10 @@ def get_inventory(
 def low_stock(
     shop_id: str,
     threshold: int = Query(default=5),
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
+    assert_shop_access(user, shop_id)
 
     products = list(
         db.products.find({
@@ -69,7 +77,7 @@ def low_stock(
 @router.post("/restock-request")
 def request_restock(
     payload: dict,
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
 
@@ -79,6 +87,12 @@ def request_restock(
 
     if not shop_id or not product_id:
         raise HTTPException(400, "shop_id and product_id required")
+
+    assert_shop_access(user, shop_id)
+
+    # Make sure the product actually belongs to that shop.
+    if not db.products.find_one({"_id": product_id, "shop_id": shop_id}, {"_id": 1}):
+        raise HTTPException(404, "Product not found in this shop")
 
     request = {
         "_id": str(uuid.uuid4()),
@@ -104,7 +118,7 @@ def request_restock(
 @router.post("/link-supplier")
 def link_supplier(
     payload: dict,
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
 
@@ -113,6 +127,8 @@ def link_supplier(
 
     if not shop_id or not supplier_id:
         raise HTTPException(400, "shop_id and supplier_id required")
+
+    assert_shop_access(user, shop_id)
 
     link = {
         "_id": str(uuid.uuid4()),
@@ -135,9 +151,10 @@ def link_supplier(
 @router.get("/summary/{shop_id}")
 def inventory_summary(
     shop_id: str,
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
+    assert_shop_access(user, shop_id)
 
     products = list(db.products.find({"shop_id": shop_id}))
 
@@ -160,7 +177,7 @@ def inventory_summary(
 @router.post("/restock")
 def restock_product(
     payload: dict,
-    user=Depends(require_roles("owner", "admin", "shopkeeper")),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
 
@@ -183,6 +200,11 @@ def restock_product(
 
     if not product:
         raise HTTPException(404, "Product not found")
+
+    # 🔐 Tenant guard — restock only allowed for shops the caller owns or
+    # is assigned to. Use the product's actual shop, not what the client
+    # claimed in the body.
+    assert_shop_access(user, product["shop_id"])
 
     old_stock = float(product.get("stock", 0))
     old_buy = float(product.get("buying_price", 0))
@@ -240,9 +262,10 @@ def restock_product(
 @router.get("/analytics/{shop_id}")
 def profit_capital_dashboard(
     shop_id: str,
-    user=Depends(require_roles("owner", "admin")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
+    assert_shop_access(user, shop_id)
 
     # =========================
     # 📦 PRODUCTS

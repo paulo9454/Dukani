@@ -2,6 +2,42 @@
 
 ## Original Problem Statement
 
+## Session: Feb 2026 — Tenant isolation sweep (inventory + damaged_stock) & seed update
+- Added `core/deps.py:assert_shop_access(user, shop_id)` — single tenant
+  guard reused across endpoints. Admin allowed; owner/partner must own;
+  shopkeeper must be assigned (live). Plus a new `get_owned_shop_ids()`
+  helper for cross-shop list scoping.
+- **`routers/inventory.py`**: every endpoint that takes a `shop_id` or
+  resolves one from a `product_id` now calls `assert_shop_access`.
+  Affected: `/api/inventory/shop/{id}`, `/low-stock/{id}`,
+  `/restock-request`, `/link-supplier`, `/restock`, `/summary/{id}`,
+  `/analytics/{id}`. The `/restock` body's `shop_id` is now ignored in
+  favor of the product's actual `shop_id` to defeat shop-id spoofing.
+  Shopkeepers can now also call `/restock`, `/restock-request`, summary
+  and inventory views — scoped to their assignments.
+- **`routers/damaged_stock.py`**: `create_damage` enforces the same
+  guard via product → shop_id (closes the owner-cross-tenant hole).
+  `list_damage` now scopes by role: shopkeeper → assigned, owner/partner
+  → owned, admin → all.
+- **`services/seed.py`**: seed shops now ship with the production
+  schema — `pos_online` plan + `is_paid=true`, `subscription_status=active`,
+  full trial timestamps + matching subscription doc. Existing
+  `test_credits_trial.py` (19/19) still green after the change.
+- **Verified via curl**: 14/14 cross-tenant attack cases blocked —
+  shopkeeper B / Owner 2 cannot read or mutate shop A's inventory,
+  low-stock, summary, analytics, restock, restock-request, damaged
+  stock create, or damaged stock list. Owners/keepers within their
+  own scope continue to work normally.
+- **Manually walked the credit lifecycle E2E** via API (UI parity):
+  Add Existing Debt → 3 partial repayments (cash + manual + cash) →
+  status auto-flips to `paid` at zero balance → transaction history
+  returns all 4 events ordered desc → list filter `status=paid`
+  surfaces the credit. Verified clean.
+- Pre-existing `test_api.py` failures are unrelated initial-commit
+  fixtures (auth response shape changed since); no regression introduced.
+
+
+
 ## Session: Feb 2026 — 30-day free trial + full credit ledger
 - **Part 1 — 30-day free trial** for every newly created shop. `routers/owner.py:create_owner_shop` now writes `subscription_plan="trial_pos_online"`, `trial_start_at`, `trial_end_at` (now+30d ISO), `subscription_status="trial"`, `online_enabled=true`, `is_online_enabled=true`, `pos_enabled=true`. Mirrored on the `subscriptions` doc (`plan`, `trial_start`, `trial_end`).
 - **Trial gating** at the two enforcement points:

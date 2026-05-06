@@ -1,5 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
-from backend.core.deps import require_roles, get_assigned_shop_ids
+from backend.core.deps import (
+    require_roles,
+    get_assigned_shop_ids,
+    get_owned_shop_ids,
+    assert_shop_access,
+)
 from backend.db.mongo import get_db
 from datetime import datetime, timezone
 import uuid
@@ -18,8 +23,10 @@ def create_damage(payload: dict, user=Depends(require_roles("owner", "admin", "p
     product = db.products.find_one({"_id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    if user["role"] == "shopkeeper" and product["shop_id"] not in get_assigned_shop_ids(user["_id"]):
-        raise HTTPException(status_code=403, detail="Shopkeeper not assigned")
+
+    # 🔐 Tenant guard — works for owner, partner, shopkeeper, admin uniformly.
+    assert_shop_access(user, product["shop_id"])
+
     if qty <= 0 or qty > product.get("stock", 0):
         raise HTTPException(status_code=400, detail="Invalid damage quantity")
 
@@ -43,6 +50,11 @@ def create_damage(payload: dict, user=Depends(require_roles("owner", "admin", "p
 @router.get("")
 def list_damage(user=Depends(require_roles("owner", "admin", "partner", "shopkeeper"))):
     db = get_db()
-    if user["role"] == "shopkeeper":
-        return list(db.damaged_stock.find({"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}}))
-    return list(db.damaged_stock.find({}))
+    role = user.get("role")
+    if role == "shopkeeper":
+        scope = {"shop_id": {"$in": get_assigned_shop_ids(user["_id"])}}
+    elif role in {"owner", "partner"}:
+        scope = {"shop_id": {"$in": get_owned_shop_ids(user["_id"])}}
+    else:  # admin
+        scope = {}
+    return list(db.damaged_stock.find(scope))

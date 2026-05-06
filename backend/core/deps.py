@@ -89,6 +89,34 @@ def get_assigned_shop_ids(user_id: str) -> list[str]:
     ]
 
 
+def get_owned_shop_ids(user_id: str) -> list[str]:
+    """Shop IDs owned by a given user (for owner/partner scoping)."""
+    db = get_db()
+    return [s["_id"] for s in db.shops.find({"owner_id": user_id}, {"_id": 1})]
+
+
+def assert_shop_access(user: dict, shop_id: str) -> None:
+    """Tenant guard used by inventory / damaged-stock / restock / etc.
+
+    - admin: always allowed
+    - owner/partner: must own the shop
+    - shopkeeper: must be assigned to the shop (live `assignments` lookup)
+    """
+    role = user.get("role")
+    if role == "admin":
+        return
+    if role in {"owner", "partner"}:
+        db = get_db()
+        if not db.shops.find_one({"_id": shop_id, "owner_id": user["_id"]}, {"_id": 1}):
+            raise HTTPException(status_code=403, detail="Not your shop")
+        return
+    if role == "shopkeeper":
+        if shop_id not in get_assigned_shop_ids(user["_id"]):
+            raise HTTPException(status_code=403, detail="Not allowed for this shop")
+        return
+    raise HTTPException(status_code=403, detail="Not allowed")
+
+
 def is_shop_owner(shop, user):
     return user["role"] == "admin" or shop["owner_id"] == user["_id"]
 
