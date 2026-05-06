@@ -22,14 +22,24 @@ def check_shop_access(shop_id: str):
 
     now = datetime.utcnow()
 
-    # 🟢 FREE TRIAL (POS ONLY)
-    if sub.get("plan") == "trial_pos":
-        if sub.get("trial_end") and sub["trial_end"] > now:
-            return {"pos": True, "online": False}
+    # 🟢 FREE TRIAL — POS + Online for 30 days from shop creation.
+    if sub.get("plan") in {"trial_pos", "trial_pos_online"}:
+        trial_end = sub.get("trial_end")
+        # Stored as ISO string going forward; legacy datetimes still work.
+        if isinstance(trial_end, str):
+            try:
+                trial_end_dt = datetime.fromisoformat(trial_end.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                trial_end_dt = None
+        else:
+            trial_end_dt = trial_end
+        if trial_end_dt and trial_end_dt > now:
+            online = sub.get("plan") == "trial_pos_online"
+            return {"pos": True, "online": online, "trial": True}
 
         raise HTTPException(
             status_code=403,
-            detail="Trial expired. Please pay for POS or POS + Online",
+            detail="Your free trial has expired. Please subscribe to continue.",
         )
 
     # 💳 PAID PLANS

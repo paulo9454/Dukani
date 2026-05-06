@@ -2,6 +2,7 @@ from fastapi import APIRouter, Query, HTTPException
 from backend.db.mongo import get_db
 from backend.services.geo import haversine_km
 from backend.services.slug import slugify, ensure_unique_slug
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 
@@ -9,7 +10,7 @@ router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 # =========================
 # PLAN HELPERS
 # =========================
-ONLINE_PLANS = ("pos_online", "online", "enterprise")
+ONLINE_PLANS = ("pos_online", "online", "enterprise", "trial_pos_online")
 
 # MongoDB filter for "this shop is allowed to sell online" — applied at the
 # database level so we never pull `mpesa_*` secrets just to filter in Python.
@@ -32,10 +33,26 @@ PUBLIC_SHOP_PROJECTION = {
 
 def _online_eligible(shop: dict) -> bool:
     plan = shop.get("subscription_plan")
+    # Trial plans must still be within the 30-day window.
+    if plan == "trial_pos_online":
+        end = shop.get("trial_end_at")
+        if end:
+            try:
+                end_dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+                if end_dt.tzinfo is None:
+                    end_dt = end_dt.replace(tzinfo=timezone.utc)
+                if end_dt > datetime.now(timezone.utc):
+                    return True
+            except ValueError:
+                pass
+        return False
     if plan in ONLINE_PLANS:
         return True
     if shop.get("is_online_enabled") or shop.get("online_enabled"):
-        return True
+        # Legacy boolean — only honour for paid plans, not stale trials.
+        if plan in {"pos_online", "online", "enterprise"}:
+            return True
+        # Fallback below will validate against subscriptions.
     # 🛟 Fallback: a paid pos_online subscription exists for this shop
     # (covers the case where activation flipped the subscription record but
     # the denormalized shop doc fields drifted — saves the storefront from

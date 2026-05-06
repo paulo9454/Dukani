@@ -24,6 +24,7 @@ from backend.routers import (
     payments,
     dashboard,
     credit,
+    credits,
     credit_history,
     damaged_stock,
     suppliers,
@@ -99,6 +100,7 @@ app.include_router(marketplace.router)
 app.include_router(payments.router)
 app.include_router(dashboard.router)
 app.include_router(credit.router)
+app.include_router(credits.router)
 app.include_router(credit_history.router)
 app.include_router(damaged_stock.router)
 app.include_router(suppliers.router)

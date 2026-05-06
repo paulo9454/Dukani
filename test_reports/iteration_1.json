@@ -1,0 +1,33 @@
+{
+  "summary": "Full backend regression for Dukayko credits ledger + 30-day trial. 19/19 pytest cases pass against the public preview URL. Covered trial creation (plan=trial_pos_online, 30d window, online_enabled=true), trial gating on both /api/public/shop/{slug} and /api/orders/checkout, manual credit create (open/partial/fully-paid) + all four validation failures, list filtering, cash/manual repayment with status transitions, transaction history, overpay rejection, atomic concurrent-repay race safety (exactly 1 success + 1 x 400, balance never negative), M-Pesa STK callback credit-settlement branch (balance decrement + credit_payments_history row with method=mpesa), tenant isolation across three endpoints (shopkeeper A blocked from shop B create/list/repay/transactions), owner-without-assignment POS access on own shop, and legacy POS credit_customers row compat.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_credits_trial.py",
+    "/app/test_reports/pytest/credits_trial.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "backend/routers/credits.py _serialize retains Mongo `_id` (only dunder-prefixed keys are dropped). Acceptable since the value is a UUID string, but inconsistent with other routers that normalize to `id`.",
+    "backend/routers/credits.py repay() loads the credit once for auth then relies on find_one_and_update with $expr — good. However the 400 response 'Amount exceeds the outstanding balance' is also returned when the credit was concurrently deleted; consider distinguishing 404 vs 400 if observability matters.",
+    "backend/routers/owner.py create_owner_shop writes trial_start_at/trial_end_at as naive UTC isoformat (no tz). public.py _online_eligible handles that via .replace(tzinfo=utc). Consistent, but recommend always storing timezone-aware ISO strings to avoid future drift.",
+    "backend/routers/pos.py check_shop_access duplicates the older version in owner.py; the owner.py copy does NOT recognize trial_pos_online. Fine today because pos.py owns the checkout path, but the dead copy in owner.py is a foot-gun for future refactors — delete it.",
+    "backend/routers/credits.py repay_stk relies on import from backend.routers.payments at call time; if payments module fails to import at runtime the error surfaces as a 500. Consider importing at module top and handling env-missing gracefully."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_credits_trial.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "n/a"},
+  "test_credentials": "Used seeded owner.seed@dukani.dev / Dukani@2026, keeper.a@dukani.dev / Keeper@2026, keeper.b@dukani.dev / Keeper@2026 (via /api/dev/seed).",
+  "seed_data_creation": "Reused /api/dev/seed. All TEST_ prefixed credits and ephemeral shops are cleaned up in each test via direct Mongo cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable pytest suite is at /app/backend/tests/test_credits_trial.py. Run with: cd /app/backend && python -m pytest tests/test_credits_trial.py -v. Uses REACT_APP_BACKEND_URL from /app/frontend/.env and direct Mongo access via /app/backend/.env for arrange/teardown (trial expiry is simulated by backdating shop.trial_end_at + subscriptions.trial_end). M-Pesa STK callback success is simulated by POSTing an STK callback body with ResultCode=0 to /api/payments/mpesa/callback against a pending credit_settlement payment row inserted directly. Paystack subscription flow was intentionally NOT regression-tested per request."
+}

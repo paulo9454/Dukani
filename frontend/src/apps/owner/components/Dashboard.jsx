@@ -10,6 +10,7 @@ function Dashboard() {
     revenue: 0,
   });
   const [analytics, setAnalytics] = useState([]); // per-shop 30-day summary
+  const [trialShops, setTrialShops] = useState([]); // shops on free trial
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -58,6 +59,21 @@ function Dashboard() {
           assignments,
           revenue,
         });
+
+        // Compute trial badges — show a banner when any shop is on the
+        // 30-day free trial so owners know exactly how many days remain.
+        if (!cancelled) {
+          const now = Date.now();
+          const trials = shopList
+            .filter((s) => s.trial_end_at || s.subscription_status === "trial")
+            .map((s) => {
+              const end = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
+              const daysLeft = Math.max(0, Math.ceil((end - now) / 86400000));
+              const expired = end > 0 && end <= now;
+              return { shop: s, daysLeft, expired };
+            });
+          setTrialShops(trials);
+        }
 
         // Load 30-day analytics for each shop in parallel so owners see the
         // real-world funnel right on the dashboard.
@@ -113,6 +129,59 @@ function Dashboard() {
   return (
     <div data-testid="owner-dashboard">
       <h2>📊 Owner Dashboard</h2>
+
+      {trialShops.map(({ shop, daysLeft, expired }) => {
+        const tone = expired
+          ? { bg: "#fee2e2", border: "#fecaca", color: "#991b1b" }
+          : daysLeft < 5
+          ? { bg: "#fef3c7", border: "#fde68a", color: "#92400e" }
+          : { bg: "#dcfce7", border: "#bbf7d0", color: "#166534" };
+        return (
+          <div
+            key={shop._id}
+            data-testid={`trial-banner-${shop._id}`}
+            style={{
+              background: tone.bg,
+              border: `1px solid ${tone.border}`,
+              color: tone.color,
+              padding: "10px 14px",
+              borderRadius: 8,
+              marginTop: 12,
+              fontSize: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              justifyContent: "space-between",
+            }}
+          >
+            <span>
+              {expired ? "⛔" : daysLeft < 5 ? "⚠️" : "🎉"}
+              <b style={{ marginLeft: 6 }}>{shop.name}</b>
+              {expired
+                ? " — Your free trial has expired. Subscribe to keep selling."
+                : ` — Free trial active, ${daysLeft} day${daysLeft === 1 ? "" : "s"} left.`}
+            </span>
+            {(expired || daysLeft < 5) && (
+              <button
+                data-testid={`trial-upgrade-${shop._id}`}
+                onClick={() => (window.location.hash = "#shops")}
+                style={{
+                  background: tone.color,
+                  color: "#fff",
+                  border: "none",
+                  padding: "6px 12px",
+                  borderRadius: 6,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                Subscribe now →
+              </button>
+            )}
+          </div>
+        );
+      })}
 
       {error && (
         <div

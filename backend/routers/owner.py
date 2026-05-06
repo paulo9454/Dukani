@@ -59,14 +59,22 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
 
     shop_id = str(uuid.uuid4())
     slug = ensure_unique_slug(db, slugify(payload.get("slug") or name))
+    now = datetime.utcnow()
+    trial_end = now + timedelta(days=30)
     shop_doc = {
         "_id": shop_id,
         "name": name,
         "slug": slug,
         "owner_id": user["_id"],
-        "subscription_plan": "trial_pos",
-        "online_enabled": False,
-        "is_online_enabled": False,
+        "subscription_plan": "trial_pos_online",
+        # Trial includes BOTH POS and online so owners can experience the
+        # full product before paying.
+        "online_enabled": True,
+        "is_online_enabled": True,
+        "pos_enabled": True,
+        "trial_start_at": now.isoformat(),
+        "trial_end_at": trial_end.isoformat(),
+        "subscription_status": "trial",
         "category": payload.get("category"),
         "latitude": payload.get("latitude"),
         "longitude": payload.get("longitude"),
@@ -76,10 +84,20 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
     }
     db.shops.insert_one(shop_doc)
 
-    trial_end = datetime.utcnow() + timedelta(days=14)
-    db.subscriptions.update_one({"shop_id": shop_id}, {"$set": {"shop_id": shop_id, "plan": "trial_pos", "status": "active", "trial_end": trial_end, "is_paid": False}}, upsert=True)
+    db.subscriptions.update_one(
+        {"shop_id": shop_id},
+        {"$set": {
+            "shop_id": shop_id,
+            "plan": "trial_pos_online",
+            "status": "trial",
+            "trial_start": now.isoformat(),
+            "trial_end": trial_end.isoformat(),
+            "is_paid": False,
+        }},
+        upsert=True,
+    )
 
-    return {"message": "Shop created with 14-day POS trial", "shop": _normalize_id(shop_doc)}
+    return {"message": "Shop created with 30-day free trial (POS + Online)", "shop": _normalize_id(shop_doc)}
 
 
 SUBSCRIPTION_PRICES_KES = {

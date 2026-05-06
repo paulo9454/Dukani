@@ -700,30 +700,53 @@ def mpesa_callback(payload: dict = Body(...)):
 
     # 💳 If this STK was a credit-ledger settlement, decrement the balance.
     if status == "success" and (record or {}).get("payment_type") == "credit_settlement":
-        ledger_id = record.get("credit_ledger_id")
+        ledger_id = record.get("credit_id") or record.get("credit_ledger_id")
         amt = float(record.get("amount") or 0)
         if ledger_id and amt > 0:
-            ledger = db.credit_customers.find_one({"_id": ledger_id})
-            if ledger:
-                new_balance = max(round(ledger.get("balance", 0) - amt, 2), 0)
-                db.credit_customers.update_one(
-                    {"_id": ledger_id},
-                    {"$set": {"balance": new_balance}},
-                )
+            # Atomic update — only flip if balance can absorb the amount.
+            updated = db.credit_customers.find_one_and_update(
+                {"_id": ledger_id},
+                [
+                    {"$set": {
+                        "amount_paid": {"$add": [{"$ifNull": ["$amount_paid", 0]}, amt]},
+                        "balance": {"$max": [
+                            {"$subtract": [
+                                {"$ifNull": ["$total_amount", {"$ifNull": ["$balance", 0]}]},
+                                {"$add": [{"$ifNull": ["$amount_paid", 0]}, amt]},
+                            ]},
+                            0,
+                        ]},
+                        "status": {"$cond": [
+                            {"$lte": [
+                                {"$subtract": [
+                                    {"$ifNull": ["$total_amount", {"$ifNull": ["$balance", 0]}]},
+                                    {"$add": [{"$ifNull": ["$amount_paid", 0]}, amt]},
+                                ]},
+                                0,
+                            ]},
+                            "paid",
+                            "open",
+                        ]},
+                        "updated_at": _now_iso(),
+                    }},
+                ],
+                return_document=True,
+            )
+            if updated:
                 db.credit_payments_history.insert_one({
                     "_id": str(uuid.uuid4()),
+                    "credit_id": ledger_id,
                     "ledger_id": ledger_id,
-                    "customer_id": ledger.get("customer_id"),
-                    "shop_id": ledger.get("shop_id"),
+                    "shop_id": updated.get("shop_id"),
                     "amount": amt,
-                    "method": "mpesa_stk",
+                    "method": "mpesa",
                     "type": "credit_payment",
                     "reference": ref,
                     "created_at": _now_iso(),
                 })
                 logger.info(
                     "credit ledger=%s reduced by %.2f via stk ref=%s, new_balance=%.2f",
-                    ledger_id, amt, ref, new_balance,
+                    ledger_id, amt, ref, updated.get("balance", 0),
                 )
 
     logger.info("mpesa callback ref=%s status=%s order=%s", ref, status, (record or {}).get("order_id"))
