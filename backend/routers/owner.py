@@ -21,24 +21,13 @@ def _normalize_id(doc: dict):
 
 
 def check_shop_access(shop_id: str):
-    db = get_db()
-    sub = db.subscriptions.find_one({"shop_id": shop_id})
-    if not sub:
-        raise HTTPException(status_code=403, detail="No subscription")
+    """Deprecated — defer to the canonical implementation in pos.py.
 
-    now = datetime.utcnow()
-    if sub.get("plan") == "trial_pos":
-        if sub.get("trial_end") and sub["trial_end"] > now:
-            return {"pos": True, "online": False, "trial": True}
-        raise HTTPException(status_code=403, detail="Trial expired. Please subscribe.")
-
-    if sub.get("is_paid"):
-        if sub.get("plan") == "pos":
-            return {"pos": True, "online": False}
-        if sub.get("plan") == "pos_online":
-            return {"pos": True, "online": True}
-
-    raise HTTPException(status_code=403, detail="Subscription inactive")
+    Kept as a thin re-export so any future caller stays in sync with the
+    plan/trial semantics defined alongside checkout.
+    """
+    from backend.routers.pos import check_shop_access as _csa
+    return _csa(shop_id)
 
 
 @router.get("/shops")

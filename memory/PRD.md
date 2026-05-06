@@ -2,6 +2,25 @@
 
 ## Original Problem Statement
 
+## Session: Feb 2026 — 30-day free trial + full credit ledger
+- **Part 1 — 30-day free trial** for every newly created shop. `routers/owner.py:create_owner_shop` now writes `subscription_plan="trial_pos_online"`, `trial_start_at`, `trial_end_at` (now+30d ISO), `subscription_status="trial"`, `online_enabled=true`, `is_online_enabled=true`, `pos_enabled=true`. Mirrored on the `subscriptions` doc (`plan`, `trial_start`, `trial_end`).
+- **Trial gating** at the two enforcement points:
+  - `routers/pos.py:check_shop_access` recognises `trial_pos_online`. Returns `{pos:true, online:true, trial:true}` while live; raises `403 "Your free trial has expired. Please subscribe to continue."` once `trial_end` has passed.
+  - `routers/public.py:_online_eligible` accepts `trial_pos_online` only while `trial_end_at` is in the future; falls back to subscriptions self-heal for paid plans.
+  - The dead-code copy of `check_shop_access` in `routers/owner.py` now delegates to the canonical `pos.py` implementation (one less foot-gun).
+- **Part 2-5 — Credit (debt) ledger** — new `routers/credits.py`:
+  - `POST /api/credits/manual-create` — import existing debts from paper books. Validates total>0, paid≥0, paid≤total. Auto-status `paid|open`. Records initial `manual` transaction if paid>0.
+  - `POST /api/credits/{id}/repay` — atomic via `find_one_and_update` + `$expr` guard so concurrent repayments cannot overdraft. Methods: cash | mpesa | manual. Auto-flips `status=paid` when balance hits 0.
+  - `POST /api/credits/{id}/repay-stk` — initiates Daraja STK to debtor phone; M-Pesa callback reduces the credit atomically + writes `credit_payments_history` row with `method=mpesa`.
+  - `GET /api/credits` — tenant-scoped, status filter (open / paid / all).
+  - `GET /api/credits/{id}/transactions` — last 100 events.
+- **Part 6 — Frontend**:
+  - `Dashboard.jsx` shows per-shop trial banner ("🎉 Free trial active — X days left", warning when <5 days, expired CTA "Subscribe now →").
+  - `CreditorsPanel.jsx` rebuilt: status filter (Open/Paid/All), shop scope selector for owners, "➕ Add Existing Debt" modal (name, phone, total, already-paid, notes), "💰 Record Payment" with method prompt (cash/mpesa/manual; mpesa branches to STK push), "🕓 History" modal, status badge (`✅ PAID` / `OPEN`), red balance for unpaid, total-outstanding strip, "📒 Imported" tag for manual rows.
+- **Verified**: 19/19 pytest cases pass (`/app/backend/tests/test_credits_trial.py`) — trial creation, expiry blocks storefront + POS, manual create + 4 validation paths, list filter, partial→full repay status flip, overpay reject, concurrent-repay race safety (no overdraft), STK callback atomic decrement, tenant isolation across create/list/repay/transactions, owner-without-assignment POS access, legacy POS credit_customers compat.
+- Untouched: existing POS checkout, M-Pesa STK push, Paystack subscription/webhook, owner Paystack flow.
+
+
 ## Session: Feb 2026 — Three-pack: online recovery, creditor module, self-heal
 - **#1 — Stuck "shop unavailable" recovery** (production issue): a paying
   client's shop link kept saying "this shop is not currently selling
