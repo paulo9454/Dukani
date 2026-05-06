@@ -5,18 +5,14 @@ import { copyShopLink as _unused } from "../utils/share"; // eslint-disable-line
 
 const POLL_TIMEOUT_SECS = 90;
 
-// Build the 3-method option list based on shop capabilities.
+// Build the payment method list for the ONLINE storefront.
+// Manual M-Pesa is intentionally NOT offered here — online customers must
+// pay digitally (STK push) or pay on pickup. Manual M-Pesa stays available
+// in the in-shop POS where the shopkeeper can verify the SMS in person.
 function availableMethods(shop) {
   const methods = [];
   if (shop?.mpesa_configured) {
     methods.push({ v: "mpesa", l: "🟢 M-Pesa (Instant)" });
-  }
-  if (shop?.mpesa_till_number || shop?.mpesa_paybill_number) {
-    methods.push({ v: "mpesa_manual", l: "💵 Pay manually (M-Pesa)" });
-  } else if (!shop?.mpesa_configured) {
-    // Shop has NO M-Pesa setup at all — still offer manual so customer can
-    // message the owner directly; manual UI shows "contact the owner".
-    methods.push({ v: "mpesa_manual", l: "💵 Pay manually (M-Pesa)" });
   }
   methods.push({ v: "cash", l: "💵 Pay on pickup" });
   return methods;
@@ -26,7 +22,7 @@ export default function CheckoutModal({ open, onClose, slug, shop, cart, onSucce
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const methods = availableMethods(shop);
-  const [method, setMethod] = useState(methods[0]?.v || "mpesa_manual");
+  const [method, setMethod] = useState(methods[0]?.v || "cash");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);

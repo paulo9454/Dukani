@@ -106,6 +106,7 @@ def _public_shop_view(shop: dict, slug: str) -> dict:
         "address": shop.get("address"),
         "latitude": shop.get("latitude"),
         "longitude": shop.get("longitude"),
+        "phone": shop.get("phone") or shop.get("contact_phone"),
         "subscription_plan": shop.get("subscription_plan"),
         # Payment capabilities — customer-safe (no secrets, never).
         "mpesa_configured": mpesa_configured,

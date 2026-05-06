@@ -2,6 +2,19 @@
 
 ## Original Problem Statement
 
+## Session: Feb 2026 — Online storefront polish + payment-method scope
+- **Removed `mpesa_manual` from the online checkout** (`components/CheckoutModal.jsx:availableMethods`). Online customers now only see "🟢 M-Pesa (Instant)" and "💵 Pay on pickup". The in-shop POS still offers Manual M-Pesa where the shopkeeper can verify the SMS in person.
+- **Storefront upgrade** (`pages/PublicShopPage.jsx`):
+  - New gradient hero banner with the shop logo (or initial fallback), bold name, description, and a row of premium chips: 📂 category, 📍 click-through Google Maps link (uses `lat,lng` if available, else free-text address), 📞 click-to-call phone.
+  - Trust strip: 🔒 Secure checkout · 🟢 M-Pesa & Card · 📦 Local delivery · ⭐ Verified shop.
+  - Sub-header line ("X items available · prices in KES · order online") + product cards with `Out of stock` badge overlay and disabled "Sold out" button when `stock=0`.
+  - Footer with shop address + "Powered by Dukayko" link to convert visitors into owners.
+- **`routers/public.py:_public_shop_view`** now returns `phone` (mapped from `phone` or `contact_phone`) so the click-to-call chip renders.
+- Verified backend: `/api/public/shop/{slug}` returns address, latitude, longitude, phone. Tenant + 19/19 credit/trial pytest still green.
+- Resolved a stale Vite cache (an old broken LandingPage version was being served from `node_modules/.vite`); cleared cache + restarted; the dev server now compiles cleanly.
+
+
+
 ## Session: Feb 2026 — Tenant isolation sweep (inventory + damaged_stock) & seed update
 - Added `core/deps.py:assert_shop_access(user, shop_id)` — single tenant
   guard reused across endpoints. Admin allowed; owner/partner must own;
