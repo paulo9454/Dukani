@@ -3,6 +3,7 @@ import API from "../../api/client";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 import ProductImage from "../../components/ProductImage";
 import CreditorsPanel from "../../components/CreditorsPanel";
+import { formatBaseStock } from "../../utils/productTypes";
 import "../../receipt.css";
 
 function PosApp({ user, shopId }) {
@@ -37,6 +38,7 @@ const [newCreditor, setNewCreditor] = useState({
 });
 const [cashReceived, setCashReceived] = useState("");
 const [creditorsOpen, setCreditorsOpen] = useState(false);
+const [pickerProduct, setPickerProduct] = useState(null);
 
   useEffect(() => {
     if (assignedShopId) setActiveShopId(assignedShopId);
@@ -216,6 +218,21 @@ const loadCategories = useCallback(async () => {
   };
 
   const clearCart = () => setCart([]);
+
+  // Decide whether to open the unit/variant picker or add directly.
+  const handleAddClick = (product) => {
+    const isUB =
+      product.product_type === "unit_based" &&
+      (product.selling_units || []).length > 0;
+    const isVR =
+      product.product_type === "variant" &&
+      (product.variants || []).length > 0;
+    if (isUB || isVR) {
+      setPickerProduct(product);
+      return;
+    }
+    add(product);
+  };
   const createCreditor = async () => {
   try {
     const res = await API.post("/api/credit-customers", {
@@ -339,7 +356,7 @@ useEffect(() => {
       }
 
       if (e.key === "Enter" && filteredProducts[activeIndex]) {
-        add(filteredProducts[activeIndex]);
+        handleAddClick(filteredProducts[activeIndex]);
       }
 
       if (e.ctrlKey && e.key === "Enter") {
@@ -478,6 +495,40 @@ useEffect(() => {
   gap: 12
 }}>
   {filteredProducts.map((p, idx) => {
+    const isUB =
+      p.product_type === "unit_based" &&
+      (p.selling_units || []).length > 0;
+    const isVR =
+      p.product_type === "variant" && (p.variants || []).length > 0;
+
+    let priceLabel = `KES ${getPrice(p)}`;
+    let stockLabel = null;
+    let outOfStock = false;
+
+    if (isUB) {
+      const prices = (p.selling_units || [])
+        .map((u) => Number(u.price || 0))
+        .filter((n) => n > 0);
+      const min = prices.length ? Math.min(...prices) : 0;
+      priceLabel = `from KES ${min}`;
+      stockLabel = `${formatBaseStock(p.base_stock_quantity, p.base_unit)} left`;
+      outOfStock = Number(p.base_stock_quantity || 0) <= 0;
+    } else if (isVR) {
+      const prices = (p.variants || [])
+        .map((v) => Number(v.price || p.price || 0))
+        .filter((n) => n > 0);
+      const min = prices.length ? Math.min(...prices) : Number(p.price || 0);
+      priceLabel = `from KES ${min}`;
+      const totalVar = (p.variants || []).reduce(
+        (sum, v) => sum + Number(v.stock || 0),
+        0,
+      );
+      stockLabel = `${totalVar} in stock`;
+      outOfStock = totalVar <= 0;
+    } else {
+      outOfStock = Number(p.stock || 0) <= 0;
+    }
+
     return (
     <div
       key={p._id}
@@ -490,10 +541,33 @@ useEffect(() => {
         boxShadow: "0 1px 2px rgba(15,23,42,0.06)",
         border: "1px solid #e2e8f0",
         position: "relative",
+        opacity: outOfStock ? 0.6 : 1,
       }}
     >
       {/* IMAGE */}
       <ProductImage product={p} alt={p.name} height={120} />
+
+      {/* TYPE BADGE */}
+      {(isUB || isVR) && (
+        <span
+          data-testid={`pos-product-type-${p._id}`}
+          style={{
+            position: "absolute",
+            top: 8,
+            left: 8,
+            background: isUB ? "#0ea5e9" : "#a855f7",
+            color: "#fff",
+            fontSize: 10,
+            padding: "2px 6px",
+            borderRadius: 6,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+          }}
+        >
+          {isUB ? "Units" : "Variants"}
+        </span>
+      )}
 
       {/* NAME */}
       <b style={{ display: "block", marginTop: 8, color: "#0f172a" }}>
@@ -507,27 +581,35 @@ useEffect(() => {
 
       {/* PRICE */}
       <div style={{ marginTop: 5, fontWeight: 700, color: "#0f172a" }}>
-        KES {getPrice(p)}
+        {priceLabel}
       </div>
+
+      {/* STOCK */}
+      {stockLabel && (
+        <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
+          {stockLabel}
+        </div>
+      )}
 
       {/* QUICK ADD BUTTON */}
       <button
-        onClick={() => add(p)}
+        onClick={() => handleAddClick(p)}
+        disabled={outOfStock}
         data-testid={`pos-add-${p._id}`}
         style={{
           marginTop: 8,
           width: "100%",
           padding: 10,
-          background: "#16a34a",
+          background: outOfStock ? "#cbd5e1" : "#16a34a",
           color: "#fff",
           border: "none",
           borderRadius: 8,
-          cursor: "pointer",
+          cursor: outOfStock ? "not-allowed" : "pointer",
           fontWeight: 700,
           minHeight: 44,
         }}
       >
-        + Add
+        {outOfStock ? "Sold out" : isUB || isVR ? "Choose option" : "+ Add"}
       </button>
     </div>
   );
@@ -563,7 +645,7 @@ useEffect(() => {
 
         {cart.map((i) => (
   <div
-    key={i._id}
+    key={i._lineId || i._id}
     style={{
       display: "flex",
       justifyContent: "space-between",
@@ -580,8 +662,8 @@ useEffect(() => {
     </div>
 
     <div style={{ display: "flex", gap: 5 }}>
-      <button onClick={() => decrease(i._id)}>-</button>
-      <button onClick={() => increase(i._id)}>+</button>
+      <button onClick={() => decrease(i._lineId)} data-testid={`pos-cart-decrease-${i._lineId}`}>-</button>
+      <button onClick={() => increase(i._lineId)} data-testid={`pos-cart-increase-${i._lineId}`}>+</button>
     </div>
   </div>
 ))}
@@ -835,6 +917,17 @@ useEffect(() => {
   onClose={() => setLastReceipt(null)}
 />
 
+      {pickerProduct && (
+        <ProductPickerModal
+          product={pickerProduct}
+          onClose={() => setPickerProduct(null)}
+          onPick={(choice) => {
+            add(pickerProduct, choice);
+            setPickerProduct(null);
+          }}
+        />
+      )}
+
       {creditorsOpen && (
         <div
           data-testid="pos-creditors-modal"
@@ -953,3 +1046,155 @@ function Receipt({ data, onClose }) {
   );
 }
 export default PosApp;
+
+function ProductPickerModal({ product, onClose, onPick }) {
+  const isUB =
+    product.product_type === "unit_based" &&
+    (product.selling_units || []).length > 0;
+  const isVR =
+    product.product_type === "variant" && (product.variants || []).length > 0;
+
+  const options = isUB
+    ? (product.selling_units || []).map((u) => {
+        const enough =
+          Number(product.base_stock_quantity || 0) >= Number(u.quantity || 0);
+        return {
+          key: u.label,
+          title: u.label,
+          subtitle: `${u.quantity} ${u.unit || product.base_unit}`,
+          price: Number(u.price || 0),
+          available: enough,
+          choice: { unit_label: u.label },
+        };
+      })
+    : isVR
+    ? (product.variants || []).map((v) => ({
+        key: v.name,
+        title: v.name,
+        subtitle: `${Number(v.stock || 0)} in stock`,
+        price: Number(v.price || product.price || 0),
+        available: Number(v.stock || 0) > 0,
+        choice: { variant_name: v.name },
+      }))
+    : [];
+
+  return (
+    <div
+      data-testid="pos-picker-modal"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(15,23,42,0.55)",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 16,
+        zIndex: 1100,
+      }}
+    >
+      <div
+        style={{
+          background: "#fff",
+          width: "min(420px, 100%)",
+          maxHeight: "85vh",
+          overflow: "auto",
+          borderRadius: 14,
+          padding: 18,
+          boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+          }}
+        >
+          <h3 style={{ margin: 0, color: "#0f172a" }}>
+            Choose {isUB ? "size" : "option"}
+          </h3>
+          <button
+            onClick={onClose}
+            data-testid="pos-picker-close"
+            style={{
+              background: "transparent",
+              border: "none",
+              fontSize: 22,
+              cursor: "pointer",
+              color: "#475569",
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        <div style={{ marginBottom: 12 }}>
+          <b style={{ color: "#0f172a", fontSize: 16 }}>{product.name}</b>
+          {isUB && (
+            <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>
+              Available:{" "}
+              {(() => {
+                const n = Number(product.base_stock_quantity || 0);
+                const u = product.base_unit;
+                if (u === "kg" || u === "g")
+                  return `${(n / 1000).toFixed(2)} kg`;
+                if (u === "litre" || u === "l" || u === "ml")
+                  return `${(n / 1000).toFixed(2)} L`;
+                return `${n}`;
+              })()}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          {options.map((o) => (
+            <button
+              key={o.key}
+              data-testid={`pos-picker-option-${o.key}`}
+              disabled={!o.available}
+              onClick={() => o.available && onPick(o.choice)}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                padding: "12px 14px",
+                background: o.available ? "#f8fafc" : "#f1f5f9",
+                border: "1px solid #e2e8f0",
+                borderRadius: 10,
+                cursor: o.available ? "pointer" : "not-allowed",
+                opacity: o.available ? 1 : 0.6,
+                textAlign: "left",
+              }}
+            >
+              <div>
+                <div
+                  style={{ fontWeight: 700, color: "#0f172a", fontSize: 15 }}
+                >
+                  {o.title}
+                </div>
+                <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
+                  {o.subtitle}
+                  {!o.available && " · Sold out"}
+                </div>
+              </div>
+              <div
+                style={{
+                  fontWeight: 800,
+                  color: "#16a34a",
+                  fontSize: 16,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                KES {o.price}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

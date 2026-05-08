@@ -6,6 +6,7 @@ import RestockModal from "../../components/RestockModal";
 import ProductImage from "../../components/ProductImage";
 import API from "../../api/client";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
+import { formatBaseStock } from "../../utils/productTypes";
 
 function ProductsPage({ shopId }) {
   const [products, setProducts] = useState([]);
@@ -65,6 +66,81 @@ function ProductsPage({ shopId }) {
     const buy = Number(p.buying_price || 0);
     const sell = Number(p.price || 0);
     return (sell - buy).toFixed(2);
+  };
+
+  // Human-readable stock summary that respects the new product types.
+  const renderStock = (p) => {
+    if (
+      p.product_type === "unit_based" &&
+      Array.isArray(p.selling_units) &&
+      p.selling_units.length > 0
+    ) {
+      return formatBaseStock(p.base_stock_quantity, p.base_unit);
+    }
+    if (
+      p.product_type === "variant" &&
+      Array.isArray(p.variants) &&
+      p.variants.length > 0
+    ) {
+      const total = p.variants.reduce(
+        (sum, v) => sum + Number(v.stock || 0),
+        0,
+      );
+      return `${total} (${p.variants.length} variants)`;
+    }
+    return `${p.stock ?? 0}`;
+  };
+
+  const renderTypeBadge = (p) => {
+    if (
+      p.product_type === "unit_based" &&
+      Array.isArray(p.selling_units) &&
+      p.selling_units.length > 0
+    ) {
+      return (
+        <span
+          data-testid={`inventory-type-${p._id}`}
+          style={{
+            background: "#0ea5e9",
+            color: "#fff",
+            fontSize: 10,
+            padding: "2px 6px",
+            borderRadius: 6,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+            marginLeft: 6,
+          }}
+        >
+          Units
+        </span>
+      );
+    }
+    if (
+      p.product_type === "variant" &&
+      Array.isArray(p.variants) &&
+      p.variants.length > 0
+    ) {
+      return (
+        <span
+          data-testid={`inventory-type-${p._id}`}
+          style={{
+            background: "#a855f7",
+            color: "#fff",
+            fontSize: 10,
+            padding: "2px 6px",
+            borderRadius: 6,
+            fontWeight: 700,
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+            marginLeft: 6,
+          }}
+        >
+          Variants
+        </span>
+      );
+    }
+    return null;
   };
 
   return (
@@ -146,9 +222,13 @@ function ProductsPage({ shopId }) {
 
           <div style={{ flex: 1, minWidth: 0 }}>
             <b style={{ color: "#0f172a" }}>{p.name}</b>
+            {renderTypeBadge(p)}
 
-            <div style={{ fontSize: 13, color: "#334155", marginTop: 2 }}>
-              📂 {categoryLabel(p.category) || getCategoryName(p.category_id) || "Uncategorized"} | 📦 {p.stock} | 🧾 {p.unit_type}
+            <div
+              style={{ fontSize: 13, color: "#334155", marginTop: 2 }}
+              data-testid={`inventory-stock-${p._id}`}
+            >
+              📂 {categoryLabel(p.category) || getCategoryName(p.category_id) || "Uncategorized"} | 📦 {renderStock(p)} | 🧾 {p.unit_type}
             </div>
 
             <div style={{ marginTop: 4, color: "#0f172a" }}>

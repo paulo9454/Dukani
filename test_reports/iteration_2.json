@@ -1,0 +1,38 @@
+{
+  "summary": "Frontend regression for new product types (standard / unit_based / variant) across POS, Inventory and checkout. Seeded shop d5080217..., created TEST_Sugar Bulk (unit_based, base 50000g, 250g@40, 500g@75) and TEST_Sneakers (variant, Size 40 stock 5, Size 42 stock 3, Size 44 stock 0) via /api/products. Logged in as owner.seed and exercised: (1) POS product cards — UNITS badge + 'from KES 40' + '50.00 kg left' on Sugar Bulk; VARIANTS badge + 'from KES 2500' + '8 in stock' on Sneakers; standard Seed Phone shows 'KES 300' + '+ Add'. (2) Standard direct add to cart works. (3) Picker modal opens for unit_based, lists 250g/500g with subtitle and price, closes on pick. (4) Picker modal opens for variant, sold-out Size 44 button is disabled. (5) Cart adds two separate lines for 250g vs 500g vs Size 40, each with its own _lineId; the per-line + button increments only that line. (6) Cash checkout for a mixed cart (1× Seed Phone, 2× Sugar Bulk 250g, 1× Sugar Bulk 500g, 1× Sneakers Size 40) succeeded → receipt shown → backend stock atomically decremented as expected: Seed Phone stock 10→9, TEST_Sugar Bulk base_stock 50000→49000 (250×2+500=1000), TEST_Sneakers Size 40 5→4 with Size 42 & 44 untouched. (7) Inventory tab renders 'inventory-stock-{id}' as '📦 49.00 kg' for the unit-based product (no raw grams in parens), '📦 7 (3 variants)' for the variant product, '📦 9' for standard, with UNITS / VARIANTS badges via inventory-type-{id} for the new types and no badge for standard.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Inventory > TEST_Sneakers", "issues": ["Category renders as raw slug 'fashion' instead of '👜 Fashion' label. categoryLabel(p.category) returns the slug when not in DEFAULT_CATEGORIES; same on POS card. Minor but inconsistent with other categories."]},
+      {"screen": "POS Cart row", "issues": ["Per-line + and - buttons render with no left padding so they sit very close to the price text. Functional but slightly cramped on narrow viewports."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_product_types.py (existing, untouched)",
+    "/app/backend/tests/test_credits_trial.py (existing)"
+  ],
+  "action_items": [
+    "Optional polish: in Inventory and POS cards resolve p.category through a label map that also covers DB-defined categories (categoryLabel currently only checks DEFAULT_CATEGORIES, so 'fashion' falls through). Not a blocker.",
+    "Optional UX: surface an inline 'Sold out' state in the cart if a unit-based line's qty * unit.quantity exceeds remaining base_stock_quantity — today the user only learns at checkout."
+  ],
+  "critical_code_review_comments": [
+    "PosApp.jsx add(): for unit_based products stock is set to Infinity at the line level. This relies entirely on backend enforcement on checkout; if the checkout fails the user sees a generic alert(JSON.stringify(detail)). Consider mapping the backend error into a friendlier toast.",
+    "PosApp.jsx ProductPickerModal subtitle uses `${u.unit || product.base_unit}` but the create_product route currently strips the per-unit `unit` field (selling_units stored as {label,quantity,price} only — see API response). It works because base_unit is used as fallback, but the optional per-unit unit override is effectively dead code today.",
+    "PosApp.jsx is 1200 lines (POS shell + Receipt + ProductPickerModal); split ProductPickerModal and Receipt into their own files for readability and to enable unit testing.",
+    "POS card 'stockLabel' for variant uses simple sum of v.stock without subtracting v.reserved. Acceptable for hint, but slightly overstates available count when concurrent reservations exist.",
+    "ProductsPage.jsx renderStock for variant shows total stock across all variants but does not surface per-variant low-stock; consider a tooltip listing each variant when count is low."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only request)", "frontend": "100% (all 11 acceptance bullets verified)"},
+  "test_credentials": "owner.seed@dukani.dev / Dukani@2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Called POST /api/dev/seed, then created two TEST_-prefixed products via POST /api/products (multipart): TEST_Sugar Bulk (id 42689f9f-ee76-464e-853c-878b232985c1, unit_based, base_unit=g, base_stock_quantity=50000, selling_units 250g@40 and 500g@75) and TEST_Sneakers (id f11a0724-2562-40a7-bcdf-89a6426a952d, variant, Size 40 stock 5, Size 42 stock 3, Size 44 stock 0). After the test the products remain with decremented stocks (49000g sugar; Size 40 stock 4); rerunning the test will continue to deduct, so re-seed if needed.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "POS route uses query param `shopId` (camelCase), not `shop_id`. Login form inputs are placeholder-based ('Email','Password'), not type=email. Owner panel sidebar has an 'Inventory' link; the inventory page has a top-right shop dropdown (the 2nd <select> on the page) that you must use to switch to the seeded shop. Backend stock decrement on POS checkout was verified against the public preview URL via direct GET /api/products. Public storefront /shop/dukani-store flow was NOT executed in this iteration — code in /app/frontend/src/pages/PublicShopPage.jsx mirrors the POS picker logic but should still be smoke-tested if requested.",
+  "rca of the issue": "n/a — no defects found in this iteration."
+}
