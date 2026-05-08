@@ -2,9 +2,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.db.mongo import get_db
 from backend.core.deps import require_roles, get_assigned_shop_ids
 import uuid
+import json
 from datetime import datetime
 from fastapi import UploadFile, File, Form
 import os
+
+
+def _normalize_amount(amount, unit):
+    """Convert (amount, unit) to base unit (g for mass, ml for volume)."""
+    amount = float(amount or 0)
+    if unit in ("kg", "litre", "l"):
+        return amount * 1000.0
+    return amount
 
 router = APIRouter(prefix="/api/products", tags=["products"])
 
@@ -79,17 +88,48 @@ async def create_product(
     low_stock_threshold: int = Form(5),
     unit_type: str = Form("piece"),
     conversion_factor: float = Form(1),
+    product_type: str = Form("standard"),
+    base_unit: str = Form(None),
+    base_stock_quantity: float = Form(0),
+    selling_units: str = Form("[]"),  # JSON-stringified list
+    variants: str = Form("[]"),       # JSON-stringified list
     image: UploadFile = File(None),
     user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
 ):
     db = get_db()
 
+    # Parse + sanitize selling_units / variants up front so we never
+    # persist garbage that would break checkout later.
+    try:
+        units_list = json.loads(selling_units or "[]") or []
+        variants_list = json.loads(variants or "[]") or []
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid selling_units / variants JSON")
+
+    if product_type == "unit_based":
+        if base_unit not in {"g", "kg", "ml", "litre", "l"}:
+            raise HTTPException(status_code=400, detail="base_unit must be g, kg, ml, or litre")
+        if not units_list:
+            raise HTTPException(status_code=400, detail="Add at least one selling unit")
+        for u in units_list:
+            if not u.get("label") or float(u.get("quantity") or 0) <= 0 or float(u.get("price") or 0) <= 0:
+                raise HTTPException(status_code=400, detail="Each selling unit needs label, quantity, price")
+    elif product_type == "variant":
+        if not variants_list:
+            raise HTTPException(status_code=400, detail="Add at least one variant")
+        for v in variants_list:
+            if not v.get("name"):
+                raise HTTPException(status_code=400, detail="Each variant needs a name")
+            v["stock"] = float(v.get("stock") or 0)
+            v["price"] = float(v.get("price") or 0)
+            v["reserved"] = 0
+    elif product_type != "standard":
+        raise HTTPException(status_code=400, detail="product_type must be standard | unit_based | variant")
+
     image_url = None
     if image and getattr(image, "filename", None):
         file_ext = image.filename.split(".")[-1]
         filename = f"{uuid.uuid4()}.{file_ext}"
-        # Save into backend/static/products so it is served by the
-        # StaticFiles mount registered in server.py (BASE_DIR/static).
         upload_dir = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "static",
@@ -116,11 +156,26 @@ async def create_product(
         "low_stock_threshold": int(low_stock_threshold or 5),
         "unit_type": unit_type or "piece",
         "conversion_factor": float(conversion_factor or 1),
+        "product_type": product_type,
         "is_public": True,
         "created_at": datetime.utcnow().isoformat(),
         "created_by": user["_id"],
         "image": image_url,
     }
+
+    if product_type == "unit_based":
+        product["base_unit"] = base_unit
+        # Always store base stock in the smallest unit (g or ml) so
+        # checkout math is integer-clean.
+        product["base_stock_quantity"] = float(_normalize_amount(base_stock_quantity, base_unit))
+        product["reserved_base"] = 0.0
+        product["selling_units"] = [
+            {"label": u["label"], "quantity": float(u["quantity"]), "price": float(u["price"])}
+            for u in units_list
+        ]
+    elif product_type == "variant":
+        product["variants"] = variants_list
+
     db.products.insert_one(product)
     return product
 

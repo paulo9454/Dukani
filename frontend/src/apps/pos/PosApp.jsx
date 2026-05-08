@@ -142,49 +142,76 @@ const loadCategories = useCallback(async () => {
 
   return `${import.meta.env.VITE_BACKEND_URL || ""}${normalized}`;
 };
-  const add = (product) => {
-    const price = getPrice(product);
-    const stock = product.stock ?? Infinity;
+  const add = (product, choice = {}) => {
+    let price = getPrice(product);
+    let stock = product.stock ?? Infinity;
+    let displayName = product.name;
+    const isUB = product.product_type === "unit_based" && (product.selling_units || []).length;
+    const isVR = product.product_type === "variant" && (product.variants || []).length;
+
+    if (isUB) {
+      const u =
+        (product.selling_units || []).find((x) => x.label === choice.unit_label) ||
+        product.selling_units[0];
+      if (!u) return;
+      price = Number(u.price || 0);
+      // For unit-based, "stock" is unlimited at item level; we let the
+      // backend enforce base_stock_quantity on checkout.
+      stock = Infinity;
+      displayName = `${product.name} · ${u.label}`;
+      choice = { unit_label: u.label };
+    } else if (isVR) {
+      const v =
+        (product.variants || []).find((x) => x.name === choice.variant_name) ||
+        product.variants[0];
+      if (!v) return;
+      price = Number(v.price || product.price || 0);
+      stock = Number(v.stock || 0);
+      displayName = `${product.name} · ${v.name}`;
+      choice = { variant_name: v.name };
+    }
+
+    const lineId = `${product._id}::${choice.unit_label || choice.variant_name || "default"}`;
 
     setCart((prev) => {
-    
-      const found = prev.find((i) => i._id === product._id);
-
+      const found = prev.find((i) => i._lineId === lineId);
       if (found) {
         if (found.qty >= stock) return prev;
         return prev.map((i) =>
-          i._id === product._id ? { ...i, qty: i.qty + 1 } : i
+          i._lineId === lineId ? { ...i, qty: i.qty + 1 } : i,
         );
       }
-
       return [
         ...prev,
         {
           _id: product._id,
-          name: product.name,
+          _lineId: lineId,
+          name: displayName,
           price,
           qty: 1,
           stock,
+          unit_label: choice.unit_label || null,
+          variant_name: choice.variant_name || null,
         },
       ];
     });
   };
 
-  const increase = (id) => {
+  const increase = (lineId) => {
     setCart((prev) =>
       prev.map((i) =>
-        i._id === id
+        i._lineId === lineId
           ? { ...i, qty: Math.min(i.qty + 1, i.stock || Infinity) }
-          : i
-      )
+          : i,
+      ),
     );
   };
 
-  const decrease = (id) => {
+  const decrease = (lineId) => {
     setCart((prev) =>
       prev
-        .map((i) => (i._id === id ? { ...i, qty: i.qty - 1 } : i))
-        .filter((i) => i.qty > 0)
+        .map((i) => (i._lineId === lineId ? { ...i, qty: i.qty - 1 } : i))
+        .filter((i) => i.qty > 0),
     );
   };
 
@@ -235,6 +262,8 @@ if (paymentMethod === "cash" && Number(cashReceived) < subtotal) {
         items: cart.map((i) => ({
           product_id: i._id,
           qty: i.qty,
+          unit_label: i.unit_label || undefined,
+          variant_name: i.variant_name || undefined,
         })),
         payment_provider: "POS",
 	channel: "pos",   // ✅ ADD THIS LINE

@@ -106,7 +106,12 @@ export default function CheckoutModal({ open, onClose, slug, shop, cart, onSucce
       const orderRes = await API.post("/api/orders/create", {
         shop_slug: slug,
         customer_info: { name: name || "Customer", phone: clean },
-        items: cart.map((c) => ({ product_id: c._id, quantity: c.qty })),
+        items: cart.map((c) => ({
+          product_id: c._id,
+          quantity: c.qty,
+          unit_label: c.unit_label || undefined,
+          variant_name: c.variant_name || undefined,
+        })),
       });
       const orderId = orderRes.data.order_id;
       const receiptNumber = orderRes.data.receipt_number;

@@ -25,6 +25,17 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
     stock_quantity: 0,
 
     min_stock_level: 5,
+
+    // 🆕 Product type model
+    product_type: "standard",      // standard | unit_based | variant
+    base_unit: "g",                // g | kg | ml | litre
+    base_stock_quantity: 0,        // entered in base_unit, normalized server-side
+    selling_units: [               // [{ label, quantity, price }]
+      { label: "", quantity: 0, price: 0 },
+    ],
+    variants: [                    // [{ name, stock, price }]
+      { name: "", stock: 0, price: 0 },
+    ],
   });
   
   
@@ -55,6 +66,18 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
         stock_quantity: Number(product.stock || 0),
 
         min_stock_level: Number(product.low_stock_threshold || 5),
+
+        product_type: product.product_type || "standard",
+        base_unit: product.base_unit || "g",
+        base_stock_quantity: Number(
+          product.base_stock_quantity ?? 0,
+        ),
+        selling_units: (product.selling_units && product.selling_units.length)
+          ? product.selling_units.map((u) => ({ label: u.label || "", quantity: Number(u.quantity || 0), price: Number(u.price || 0) }))
+          : [{ label: "", quantity: 0, price: 0 }],
+        variants: (product.variants && product.variants.length)
+          ? product.variants.map((v) => ({ name: v.name || "", stock: Number(v.stock || 0), price: Number(v.price || 0) }))
+          : [{ name: "", stock: 0, price: 0 }],
       });
     } else {
       setForm({
@@ -162,6 +185,38 @@ formData.append("low_stock_threshold", Number(form.min_stock_level || 5));
 formData.append("unit_type", "piece");
 formData.append("conversion_factor", 1);
 
+formData.append("product_type", form.product_type || "standard");
+if (form.product_type === "unit_based") {
+  formData.append("base_unit", form.base_unit || "g");
+  formData.append("base_stock_quantity", Number(form.base_stock_quantity || 0));
+  formData.append(
+    "selling_units",
+    JSON.stringify(
+      (form.selling_units || [])
+        .filter((u) => u.label && Number(u.quantity) > 0 && Number(u.price) > 0)
+        .map((u) => ({
+          label: u.label,
+          quantity: Number(u.quantity),
+          price: Number(u.price),
+        })),
+    ),
+  );
+}
+if (form.product_type === "variant") {
+  formData.append(
+    "variants",
+    JSON.stringify(
+      (form.variants || [])
+        .filter((v) => v.name)
+        .map((v) => ({
+          name: v.name,
+          stock: Number(v.stock || 0),
+          price: Number(v.price || 0),
+        })),
+    ),
+  );
+}
+
 // ✅ IMAGE
 if (image) {
   formData.append("image", image);
@@ -244,6 +299,23 @@ if (image) {
     }}
   />
 ) : null}
+  {/* PRODUCT TYPE SELECTOR */}
+  <div style={{ gridColumn: "1 / -1" }}>
+    <label style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>
+      Product type
+    </label>
+    <select
+      data-testid="product-type-select"
+      value={form.product_type}
+      onChange={(e) => update("product_type", e.target.value)}
+      style={{ width: "100%", padding: 8 }}
+    >
+      <option value="standard">Standard (sold per item)</option>
+      <option value="unit_based">Sold in units (sugar, oil, soap…)</option>
+      <option value="variant">Has variants (sizes, types)</option>
+    </select>
+  </div>
+
   {/* BUYING MODEL */}
   <select
     value={form.buying_unit}
@@ -309,6 +381,153 @@ if (image) {
     update("min_stock_level", Number(e.target.value))
   }
 />
+
+{/* ── UNIT-BASED FIELDS ── */}
+{form.product_type === "unit_based" && (
+  <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
+    <h4 style={{ margin: "0 0 8px" }}>⚖️ Bulk → small units</h4>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+      <select
+        data-testid="base-unit-select"
+        value={form.base_unit}
+        onChange={(e) => update("base_unit", e.target.value)}
+        style={{ padding: 8 }}
+      >
+        <option value="g">g (grams)</option>
+        <option value="kg">kg (kilograms)</option>
+        <option value="ml">ml (millilitres)</option>
+        <option value="litre">litre</option>
+      </select>
+      <input
+        data-testid="base-stock-quantity"
+        type="number"
+        placeholder={`Bulk stock in ${form.base_unit}`}
+        value={form.base_stock_quantity || ""}
+        onChange={(e) => update("base_stock_quantity", Number(e.target.value))}
+      />
+    </div>
+    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Selling units</div>
+    {(form.selling_units || []).map((u, i) => (
+      <div
+        key={i}
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
+      >
+        <input
+          placeholder="Label (e.g. 250g)"
+          value={u.label}
+          onChange={(e) => {
+            const next = [...form.selling_units];
+            next[i] = { ...next[i], label: e.target.value };
+            update("selling_units", next);
+          }}
+        />
+        <input
+          type="number"
+          placeholder={`Qty in ${form.base_unit}`}
+          value={u.quantity || ""}
+          onChange={(e) => {
+            const next = [...form.selling_units];
+            next[i] = { ...next[i], quantity: Number(e.target.value) };
+            update("selling_units", next);
+          }}
+        />
+        <input
+          type="number"
+          placeholder="Price KES"
+          value={u.price || ""}
+          onChange={(e) => {
+            const next = [...form.selling_units];
+            next[i] = { ...next[i], price: Number(e.target.value) };
+            update("selling_units", next);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => update("selling_units", form.selling_units.filter((_, j) => j !== i))}
+          style={{ background: "#fee2e2", border: "none", borderRadius: 6, cursor: "pointer" }}
+        >
+          ✕
+        </button>
+      </div>
+    ))}
+    <button
+      type="button"
+      data-testid="add-selling-unit"
+      onClick={() =>
+        update("selling_units", [
+          ...(form.selling_units || []),
+          { label: "", quantity: 0, price: 0 },
+        ])
+      }
+      style={{ background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}
+    >
+      ➕ Add selling unit
+    </button>
+  </div>
+)}
+
+{/* ── VARIANT FIELDS ── */}
+{form.product_type === "variant" && (
+  <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
+    <h4 style={{ margin: "0 0 8px" }}>👕 Variants (sizes / types)</h4>
+    {(form.variants || []).map((v, i) => (
+      <div
+        key={i}
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
+      >
+        <input
+          placeholder="Variant (e.g. Medium)"
+          value={v.name}
+          onChange={(e) => {
+            const next = [...form.variants];
+            next[i] = { ...next[i], name: e.target.value };
+            update("variants", next);
+          }}
+        />
+        <input
+          type="number"
+          placeholder="Stock"
+          value={v.stock || ""}
+          onChange={(e) => {
+            const next = [...form.variants];
+            next[i] = { ...next[i], stock: Number(e.target.value) };
+            update("variants", next);
+          }}
+        />
+        <input
+          type="number"
+          placeholder="Price KES"
+          value={v.price || ""}
+          onChange={(e) => {
+            const next = [...form.variants];
+            next[i] = { ...next[i], price: Number(e.target.value) };
+            update("variants", next);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => update("variants", form.variants.filter((_, j) => j !== i))}
+          style={{ background: "#fee2e2", border: "none", borderRadius: 6, cursor: "pointer" }}
+        >
+          ✕
+        </button>
+      </div>
+    ))}
+    <button
+      type="button"
+      data-testid="add-variant"
+      onClick={() =>
+        update("variants", [
+          ...(form.variants || []),
+          { name: "", stock: 0, price: 0 },
+        ])
+      }
+      style={{ background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}
+    >
+      ➕ Add variant
+    </button>
+  </div>
+)}
 </div>
 
         {/* AUTO CALCULATED DISPLAY */}

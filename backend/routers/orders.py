@@ -285,18 +285,30 @@ def create_online_order(
         qty = int(it.get("quantity") or it.get("qty") or 0)
         if not pid or qty <= 0:
             raise HTTPException(status_code=400, detail="Invalid item")
-        product = _reserve_stock(db, pid, shop["_id"], qty)  # raises if insufficient
-        price = float(product.get("price", 0))
+        # 🛒 Resolve qty + variant/unit choice atomically; raises 400 on insufficient stock.
+        res = _reserve_stock(db, pid, shop["_id"], {
+            "qty": qty,
+            "unit_label": it.get("unit_label"),
+            "variant_name": it.get("variant_name"),
+        })
+        product = res["product"]
+        price = float(res["unit_price"])
         subtotal = round(price * qty, 2)
         total += subtotal
-        order_items.append({
+        line = {
             "product_id": product["_id"],
             "name": product.get("name"),
             "image": product.get("image"),
             "quantity": qty,
             "price": price,
             "subtotal": subtotal,
-        })
+        }
+        if res.get("unit_label"):
+            line["unit_label"] = res["unit_label"]
+            line["unit_quantity"] = res["unit_quantity"]
+        if res.get("variant_name"):
+            line["variant_name"] = res["variant_name"]
+        order_items.append(line)
 
     order_id = str(_uuid.uuid4())
     now = _dt.now(_tz.utc).isoformat()

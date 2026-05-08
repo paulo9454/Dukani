@@ -14,6 +14,7 @@ export default function PublicShopPage({ slug }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [cart, setCart] = useState([]);
+  const [pickerChoice, setPickerChoice] = useState({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState("all");
 
@@ -74,26 +75,51 @@ export default function PublicShopPage({ slug }) {
 
   const formatKES = (n) => "KES " + Number(n || 0).toLocaleString();
 
-  const addToCart = (p) => {
+  const addToCart = (p, choice = {}) => {
+    const key = choice.unit_label || choice.variant_name || "default";
+    const lineId = `${p._id}::${key}`;
     setCart((prev) => {
-      const found = prev.find((x) => x._id === p._id);
+      const found = prev.find((x) => x._lineId === lineId);
       if (found) {
         return prev.map((x) =>
-          x._id === p._id ? { ...x, qty: x.qty + 1 } : x
+          x._lineId === lineId ? { ...x, qty: x.qty + 1 } : x,
         );
       }
-      return [...prev, { ...p, qty: 1 }];
+      // Resolve the effective price for this choice
+      let effectivePrice = Number(p.price || 0);
+      let label = "";
+      if (p.product_type === "unit_based" && choice.unit_label) {
+        const u = (p.selling_units || []).find((x) => x.label === choice.unit_label);
+        effectivePrice = Number(u?.price || 0);
+        label = ` · ${choice.unit_label}`;
+      } else if (p.product_type === "variant" && choice.variant_name) {
+        const v = (p.variants || []).find((x) => x.name === choice.variant_name);
+        effectivePrice = Number(v?.price || p.price || 0);
+        label = ` · ${choice.variant_name}`;
+      }
+      return [
+        ...prev,
+        {
+          ...p,
+          _lineId: lineId,
+          qty: 1,
+          name: p.name + label,
+          price: effectivePrice,
+          unit_label: choice.unit_label || null,
+          variant_name: choice.variant_name || null,
+        },
+      ];
     });
     // 📊 Analytics
     API.post("/api/analytics/track", {
       event_type: "add_to_cart",
       shop_id: shop?._id,
-      metadata: { product_id: p._id, name: p.name },
+      metadata: { product_id: p._id, name: p.name, choice },
     }).catch(() => {});
   };
 
-  const removeFromCart = (id) =>
-    setCart((prev) => prev.filter((x) => x._id !== id));
+  const removeFromCart = (lineId) =>
+    setCart((prev) => prev.filter((x) => x._lineId !== lineId));
 
   const cartTotal = cart.reduce(
     (sum, x) => sum + Number(x.price || 0) * x.qty,
@@ -360,7 +386,25 @@ export default function PublicShopPage({ slug }) {
             data-testid="public-shop-products"
           >
             {visibleProducts.map((p) => {
-              const inStock = (p.stock ?? 999) > 0;
+              const isUB = p.product_type === "unit_based" && (p.selling_units || []).length;
+              const isVR = p.product_type === "variant" && (p.variants || []).length;
+              const choice = pickerChoice[p._id] || {};
+              const selectedUnit = isUB
+                ? (p.selling_units.find((u) => u.label === choice.unit_label) || p.selling_units[0])
+                : null;
+              const selectedVariant = isVR
+                ? (p.variants.find((v) => v.name === choice.variant_name) || p.variants[0])
+                : null;
+              const displayPrice = isUB
+                ? selectedUnit?.price
+                : isVR
+                  ? (selectedVariant?.price ?? p.price)
+                  : p.price;
+              const inStock = isUB
+                ? Number(p.base_stock_quantity || 0) >= Number(selectedUnit?.quantity || 0)
+                : isVR
+                  ? Number(selectedVariant?.stock || 0) > 0
+                  : (p.stock ?? 999) > 0;
               return (
                 <div
                   key={p._id}
@@ -382,11 +426,86 @@ export default function PublicShopPage({ slug }) {
                       {categoryLabel(p.category)}
                     </small>
                   )}
+
+                  {/* Unit picker (sugar/oil/soap) */}
+                  {isUB && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 4px" }}>
+                      {p.selling_units.map((u) => {
+                        const active = (selectedUnit?.label) === u.label;
+                        return (
+                          <button
+                            key={u.label}
+                            data-testid={`unit-pick-${p._id}-${u.label}`}
+                            onClick={() =>
+                              setPickerChoice((s) => ({
+                                ...s,
+                                [p._id]: { ...s[p._id], unit_label: u.label },
+                              }))
+                            }
+                            style={{
+                              padding: "4px 10px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              border: active ? "2px solid #0f766e" : "1px solid #cbd5e1",
+                              background: active ? "#ccfbf1" : "#fff",
+                              color: "#0f172a",
+                              borderRadius: 999,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {u.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Variant picker (sizes/types) */}
+                  {isVR && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "8px 0 4px" }}>
+                      {p.variants.map((v) => {
+                        const active = (selectedVariant?.name) === v.name;
+                        const out = Number(v.stock || 0) <= 0;
+                        return (
+                          <button
+                            key={v.name}
+                            data-testid={`variant-pick-${p._id}-${v.name}`}
+                            disabled={out}
+                            onClick={() =>
+                              setPickerChoice((s) => ({
+                                ...s,
+                                [p._id]: { ...s[p._id], variant_name: v.name },
+                              }))
+                            }
+                            style={{
+                              padding: "4px 10px",
+                              fontSize: 12,
+                              fontWeight: 700,
+                              border: active ? "2px solid #0f766e" : "1px solid #cbd5e1",
+                              background: active ? "#ccfbf1" : out ? "#f1f5f9" : "#fff",
+                              color: out ? "#94a3b8" : "#0f172a",
+                              borderRadius: 999,
+                              textDecoration: out ? "line-through" : "none",
+                              cursor: out ? "not-allowed" : "pointer",
+                            }}
+                          >
+                            {v.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <div style={{ color: "#15803d", fontWeight: 800, marginTop: 4, fontSize: 16 }}>
-                    {formatKES(p.price)}
+                    {formatKES(displayPrice)}
                   </div>
                   <button
-                    onClick={() => addToCart(p)}
+                    onClick={() =>
+                      addToCart(p, {
+                        unit_label: isUB ? selectedUnit?.label : undefined,
+                        variant_name: isVR ? selectedVariant?.name : undefined,
+                      })
+                    }
                     disabled={!inStock}
                     data-testid={`public-add-to-cart-${p._id}`}
                     style={{
@@ -435,7 +554,7 @@ export default function PublicShopPage({ slug }) {
           <b>Cart ({cart.length})</b>
           {cart.map((c) => (
             <div
-              key={c._id}
+              key={c._lineId || c._id}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
@@ -448,7 +567,7 @@ export default function PublicShopPage({ slug }) {
               <span>
                 {formatKES(c.price * c.qty)}{" "}
                 <button
-                  onClick={() => removeFromCart(c._id)}
+                  onClick={() => removeFromCart(c._lineId || c._id)}
                   style={{
                     border: "none",
                     background: "transparent",

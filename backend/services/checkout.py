@@ -58,24 +58,131 @@ def remember_idempotency(scope: dict, key: str, order_id: str):
 # =========================
 # STOCK RESERVATION
 # =========================
-def reserve_stock(db, product_id: str, shop_id: str, qty: int):
+def _normalize_amount(amount, unit):
+    """Convert a (number, unit) pair to base unit (g or ml).
+
+    We always store base_stock_quantity in the smallest unit (g for mass,
+    ml for volume). The conversion never loses precision because all of
+    the supported units divide cleanly.
+    """
+    amount = float(amount or 0)
+    if unit in ("g", "ml"):
+        return amount
+    if unit in ("kg", "litre", "l"):
+        return amount * 1000.0
+    return amount
+
+
+def reserve_stock(db, product_id: str, shop_id: str, item: dict | int):
+    """Atomic reservation for ALL three product types.
+
+    Returns a dict: {product, unit_price, qty, unit_label?, unit_quantity?,
+    variant_name?, variant_index?}. Raises HTTPException(400) when the
+    requested quantity exceeds available stock — the atomic mongo update
+    is the source of truth, never a read-then-write check.
+
+    For backward compatibility a plain int can still be passed for `item`
+    (legacy POS callers).
+    """
+    if isinstance(item, int):
+        item = {"qty": item}
+
+    qty = int(item.get("qty") or 0)
+    if qty <= 0:
+        raise HTTPException(400, "Quantity must be > 0")
+
     product = db.products.find_one({"_id": product_id, "shop_id": shop_id})
     if not product:
         raise HTTPException(404, "Product not found")
 
-    updated = db.products.update_one(
-        {
-            "_id": product_id,
-            "shop_id": shop_id,
-            "stock": {"$gte": qty},
-        },
-        {"$inc": {"stock": -qty, "reserved": qty}},
-    )
+    ptype = product.get("product_type") or "standard"
 
-    if updated.modified_count == 0:
-        raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+    # ── 🛒 STANDARD ────────────────────────────────────────────────
+    if ptype == "standard":
+        updated = db.products.update_one(
+            {"_id": product_id, "shop_id": shop_id, "stock": {"$gte": qty}},
+            {"$inc": {"stock": -qty, "reserved": qty}},
+        )
+        if updated.modified_count == 0:
+            raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+        return {
+            "product": product,
+            "unit_price": float(product.get("price", 0)),
+            "qty": qty,
+        }
 
-    return product
+    # ── ⚖️  UNIT-BASED (sugar / oil / soap by weight or volume) ──
+    if ptype == "unit_based":
+        label = (item.get("unit_label") or "").strip()
+        if not label:
+            raise HTTPException(400, f"{product.get('name')}: pick a selling unit")
+        match = next(
+            (u for u in (product.get("selling_units") or []) if u.get("label") == label),
+            None,
+        )
+        if not match:
+            raise HTTPException(400, f"{product.get('name')}: unit '{label}' not found")
+        unit_qty = float(match.get("quantity") or 0)
+        if unit_qty <= 0:
+            raise HTTPException(400, f"{product.get('name')}: invalid unit '{label}'")
+        needed = unit_qty * qty
+        unit_price = float(match.get("price") or 0)
+
+        updated = db.products.update_one(
+            {
+                "_id": product_id,
+                "shop_id": shop_id,
+                "base_stock_quantity": {"$gte": needed},
+            },
+            {"$inc": {"base_stock_quantity": -needed, "reserved_base": needed}},
+        )
+        if updated.modified_count == 0:
+            raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+        return {
+            "product": product,
+            "unit_price": unit_price,
+            "qty": qty,
+            "unit_label": label,
+            "unit_quantity": unit_qty,
+        }
+
+    # ── 👕 VARIANT (clothes / shoes / diaper sizes) ───────────────
+    if ptype == "variant":
+        variant_name = (item.get("variant_name") or "").strip()
+        if not variant_name:
+            raise HTTPException(400, f"{product.get('name')}: pick a variant")
+        variants = product.get("variants") or []
+        variant_index = next(
+            (idx for idx, v in enumerate(variants) if v.get("name") == variant_name),
+            None,
+        )
+        if variant_index is None:
+            raise HTTPException(400, f"{product.get('name')}: variant '{variant_name}' not found")
+        variant = variants[variant_index]
+        unit_price = float(variant.get("price") or product.get("price") or 0)
+
+        # Atomically decrement only when that specific variant has stock.
+        updated = db.products.update_one(
+            {
+                "_id": product_id,
+                "shop_id": shop_id,
+                "variants": {
+                    "$elemMatch": {"name": variant_name, "stock": {"$gte": qty}}
+                },
+            },
+            {"$inc": {"variants.$.stock": -qty, "variants.$.reserved": qty}},
+        )
+        if updated.modified_count == 0:
+            raise HTTPException(400, f"Insufficient stock for {product.get('name')} ({variant_name})")
+        return {
+            "product": product,
+            "unit_price": unit_price,
+            "qty": qty,
+            "variant_name": variant_name,
+            "variant_index": variant_index,
+        }
+
+    raise HTTPException(400, f"Unknown product_type {ptype!r}")
 
 
 # =========================
@@ -107,19 +214,26 @@ def checkout_customer(
     items = []
 
     for i in cart["items"]:
-        product = reserve_stock(db, i["product_id"], shop_id, i["qty"])
-
-        price = product.get("price", 0)
-        subtotal = price * i["qty"]
+        res = reserve_stock(db, i["product_id"], shop_id, i)
+        product = res["product"]
+        price = res["unit_price"]
+        qty_i = res["qty"]
+        subtotal = price * qty_i
         total += subtotal
 
-        items.append({
+        line = {
             "product_id": product["_id"],
             "name": product.get("name"),
-            "qty": i["qty"],
+            "qty": qty_i,
             "price": price,
             "subtotal": subtotal,
-        })
+        }
+        if "unit_label" in res:
+            line["unit_label"] = res["unit_label"]
+            line["unit_quantity"] = res["unit_quantity"]
+        if "variant_name" in res:
+            line["variant_name"] = res["variant_name"]
+        items.append(line)
 
     verification = verify_payment(payment_method, total, payment_meta)
     payment_status = verification["status"]
@@ -179,14 +293,21 @@ def checkout_pos(
     order_items = []
 
     for i in items:
-        product = reserve_stock(db, i["product_id"], shop_id, i["qty"])
-
-        qty = i["qty"]
+        res = reserve_stock(db, i["product_id"], shop_id, i)
+        product = res["product"]
+        qty = res["qty"]
         price_mode = i.get("price_mode", "retail")
+        unit_label = res.get("unit_label")
+        variant_name = res.get("variant_name")
 
         buying_price = float(product.get("buying_price", 0))
 
-        if price_mode == "wholesale":
+        if unit_label or variant_name:
+            # For unit-based & variant products the resolved unit_price
+            # already accounts for the chosen size — wholesale toggle
+            # doesn't apply to those (yet).
+            selling_price = res["unit_price"]
+        elif price_mode == "wholesale":
             selling_price = float(product.get("wholesale_price", product.get("price", 0)))
         else:
             selling_price = float(product.get("price", 0))
@@ -198,8 +319,19 @@ def checkout_pos(
         total_base += subtotal
         total_profit += profit
 
+        # Re-read product for low-stock notification context.
         updated_product = db.products.find_one({"_id": product["_id"]})
-        stock_left = updated_product.get("stock", 0)
+        ptype = product.get("product_type") or "standard"
+        if ptype == "standard":
+            stock_left = updated_product.get("stock", 0)
+        elif ptype == "unit_based":
+            stock_left = updated_product.get("base_stock_quantity", 0)
+        else:  # variant
+            stock_left = next(
+                (v.get("stock", 0) for v in (updated_product.get("variants") or [])
+                 if v.get("name") == variant_name),
+                0,
+            )
         threshold = product.get("low_stock_threshold", 5)
 
         if stock_left <= threshold:
@@ -208,12 +340,12 @@ def checkout_pos(
                 "type": "LOW_STOCK",
                 "shop_id": shop_id,
                 "product_id": product["_id"],
-                "message": f"{product.get('name')} low stock ({stock_left} left)",
+                "message": f"{product.get('name')}{' ('+variant_name+')' if variant_name else ''} low stock",
                 "read": False,
                 "created_at": now(),
             })
 
-        order_items.append({
+        line = {
             "product_id": product["_id"],
             "name": product.get("name"),
             "qty": qty,
@@ -223,7 +355,13 @@ def checkout_pos(
             "price_mode": price_mode,
             "subtotal": subtotal,
             "profit": profit,
-        })
+        }
+        if unit_label:
+            line["unit_label"] = unit_label
+            line["unit_quantity"] = res.get("unit_quantity")
+        if variant_name:
+            line["variant_name"] = variant_name
+        order_items.append(line)
 
     tax = (tax_percent / 100) * total_base
     total = max(total_base + tax - discount, 0)
