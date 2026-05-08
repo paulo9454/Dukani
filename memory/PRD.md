@@ -2,6 +2,42 @@
 
 ## Original Problem Statement
 
+## Session: Feb 2026 — POS picker + inventory unit display (units/variants Phase 7)
+- **POS product cards** (`apps/pos/PosApp.jsx`) now distinguish three product types:
+  - Standard: shows `KES X` + `+ Add` (unchanged legacy flow).
+  - Unit-based: blue **UNITS** badge, `from KES <min>` price hint, human-readable
+    base stock (e.g. `49.75 kg left` via `formatBaseStock`), button label
+    "Choose option" → opens picker modal.
+  - Variant: purple **VARIANTS** badge, `from KES <min>`, total stock (sum across
+    variants), "Choose option" → picker modal.
+- **`ProductPickerModal`** new component embedded in `PosApp.jsx`. Lists every
+  unit/variant as a tappable row (title, subtitle qty/stock, price). Sold-out
+  options are visually disabled. Selecting an option closes the modal and
+  pushes a uniquely-keyed line into the cart.
+- **Cart bug fixes**: `key={i._id}` and `decrease/increase(i._id)` were
+  collapsing two different variants of the same product into one line.
+  Switched all three to `_lineId`. Added `pos-cart-increase-{lineId}` /
+  `pos-cart-decrease-{lineId}` test IDs.
+- **Keyboard `Enter` shortcut** now goes through `handleAddClick` so it opens
+  the picker for unit/variant products instead of silently auto-adding the
+  first option.
+- **Inventory list** (`apps/inventory/ProductsPage.jsx`):
+  - `renderStock` shows `49.75 kg` (unit-based, via `formatBaseStock`) or
+    `120 (3 variants)` (variant) instead of raw base quantity. Standard
+    products unchanged.
+  - `renderTypeBadge` adds inline UNITS / VARIANTS chip next to product name.
+  - New test IDs `inventory-stock-{id}`, `inventory-type-{id}`.
+- **Backend untouched** — atomic stock deduction in `services/checkout.py`
+  already enforces base_stock_quantity / variant.stock decrements.
+  Existing 32/32 backend tests remain green.
+- **Frontend testing agent: 100% (11/11 cases passed)**:
+  - Standard product still adds directly + checks out (regression OK).
+  - Unit-based: 250g and 500g picks become separate cart lines, mixed
+    checkout deducted base 50000g → 49000g atomically.
+  - Variant: Size 40 line decremented 5→4, Size 42/44 untouched, sold-out
+    Size 44 disabled in picker.
+  - Inventory shows `49.00 kg`, `7 (3 variants)`, `9`.
+
 ## Session: Feb 2026 — Online storefront polish + payment-method scope
 - **Removed `mpesa_manual` from the online checkout** (`components/CheckoutModal.jsx:availableMethods`). Online customers now only see "🟢 M-Pesa (Instant)" and "💵 Pay on pickup". The in-shop POS still offers Manual M-Pesa where the shopkeeper can verify the SMS in person.
 - **Storefront upgrade** (`pages/PublicShopPage.jsx`):
