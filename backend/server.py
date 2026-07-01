@@ -1,6 +1,8 @@
 import os
 import sys
 import uuid
+import asyncio
+import logging
 
 # Ensure repo root (parent of /app/backend) is on sys.path so `from backend.X` imports work
 # regardless of current working directory (supervisor runs uvicorn from /app/backend).
@@ -17,6 +19,7 @@ from backend.db.mongo import get_db
 from backend.services.seed import seed_full_data
 from backend.middleware.rate_limit import RateLimiterMiddleware
 from backend.middleware.security_headers import SecurityHeadersMiddleware
+from backend.tasks.order_cleanup import expire_stale_pending_orders
 
 from backend.routers import (
     auth,
@@ -148,6 +151,29 @@ def docs_favicon():
         os.path.join(DOCS_DIR, "logo.svg"),
         media_type="image/svg+xml"
     )
+
+
+
+logger = logging.getLogger(__name__)
+
+
+@app.on_event("startup")
+async def start_stale_order_cleanup_loop():
+    if getattr(app.state, "stale_order_cleanup_started", False):
+        return
+    app.state.stale_order_cleanup_started = True
+
+    async def cleanup_loop():
+        while True:
+            try:
+                expired = expire_stale_pending_orders(minutes=30)
+                if expired:
+                    logger.info("expired stale pending orders count=%s", expired)
+            except Exception:
+                logger.exception("stale pending order cleanup failed")
+            await asyncio.sleep(300)
+
+    asyncio.create_task(cleanup_loop())
 
 # =========================
 # HEALTH CHECK

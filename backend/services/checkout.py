@@ -1,8 +1,10 @@
 from fastapi import HTTPException
 from backend.db.mongo import get_db
 from backend.services.payment_verifier import verify_payment
+from backend.services.customer_accounts import apply_credit_sale_to_account
 from backend.services.receipt import build_receipt
 from backend.services.audit import audit_log
+from backend.services.subscription_service import get_subscription
 from datetime import datetime, timezone
 import uuid
 
@@ -23,16 +25,11 @@ def round2(v: float) -> float:
 # =========================
 def shop_online_enabled(shop_id: str) -> bool:
     db = get_db()
-
-    shop = db.shops.find_one({"_id": shop_id})
-    if not shop:
+    try:
+        sub = get_subscription(db, shop_id)
+        return bool(sub["features"]["online"])
+    except HTTPException:
         return False
-
-    if shop.get("online_enabled") is True:
-        return True
-
-    sub = db.subscriptions.find_one({"shop_id": shop_id})
-    return sub and sub.get("status") == "active"
 
 
 # =========================
@@ -104,7 +101,13 @@ def reserve_stock(db, product_id: str, shop_id: str, item: dict | int):
             {"$inc": {"stock": -qty, "reserved": qty}},
         )
         if updated.modified_count == 0:
-            raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+            available = int(product.get("stock") or 0)
+            unit = product.get("unit_type") or "in stock"
+            if available <= 0:
+                msg = f"{product.get('name')} is sold out"
+            else:
+                msg = f"Only {available} {unit} of {product.get('name')} left"
+            raise HTTPException(400, msg)
         return {
             "product": product,
             "unit_price": float(product.get("price", 0)),
@@ -137,7 +140,18 @@ def reserve_stock(db, product_id: str, shop_id: str, item: dict | int):
             {"$inc": {"base_stock_quantity": -needed, "reserved_base": needed}},
         )
         if updated.modified_count == 0:
-            raise HTTPException(400, f"Insufficient stock for {product.get('name')}")
+            remaining = float(product.get("base_stock_quantity") or 0)
+            base_unit = product.get("base_unit") or ""
+            packs = int(remaining // unit_qty) if unit_qty else 0
+            if packs <= 0:
+                msg = f"{product.get('name')} ({label}) is sold out"
+            else:
+                msg = f"Only {packs} × {label} of {product.get('name')} remaining"
+                if base_unit in ("g", "kg") and remaining > 0:
+                    msg += f" ({remaining/1000:.2f} kg in stock)"
+                elif base_unit in ("ml", "l", "litre") and remaining > 0:
+                    msg += f" ({remaining/1000:.2f} L in stock)"
+            raise HTTPException(400, msg)
         return {
             "product": product,
             "unit_price": unit_price,
@@ -173,9 +187,15 @@ def reserve_stock(db, product_id: str, shop_id: str, item: dict | int):
             {"$inc": {"variants.$.stock": -qty, "variants.$.reserved": qty}},
         )
         if updated.modified_count == 0:
-            raise HTTPException(400, f"Insufficient stock for {product.get('name')} ({variant_name})")
+            available = int(variant.get("stock") or 0)
+            if available <= 0:
+                msg = f"{product.get('name')} ({variant_name}) is sold out"
+            else:
+                msg = f"Only {available} of {product.get('name')} ({variant_name}) left"
+            raise HTTPException(400, msg)
         return {
             "product": product,
+            "variant": variant,
             "unit_price": unit_price,
             "qty": qty,
             "variant_name": variant_name,
@@ -279,6 +299,15 @@ def checkout_pos(
 ):
     db = get_db()
 
+    credit_customer_id = None
+    if payment_method == "credit":
+        credit_customer_id = (payment_meta or {}).get("credit_customer_id")
+        if not credit_customer_id:
+            raise HTTPException(400, "Customer account is required for credit checkout")
+        account = db.credit_customers.find_one({"_id": credit_customer_id, "shop_id": shop_id}, {"_id": 1})
+        if not account:
+            raise HTTPException(404, "Customer account not found for this shop")
+
     scope = {
         "shop_id": shop_id,
         "operator_id": operator["_id"],
@@ -300,7 +329,23 @@ def checkout_pos(
         unit_label = res.get("unit_label")
         variant_name = res.get("variant_name")
 
-        buying_price = float(product.get("buying_price", 0))
+        if variant_name:
+            buying_price = float(
+                (res.get("variant") or {}).get(
+                    "buying_price",
+                    product.get("buying_price", 0),
+                )
+            )
+        else:
+            buying_price = float(product.get("buying_price", 0))
+
+        unit_quantity = float(res.get("unit_quantity") or 0)
+        if unit_label and unit_quantity > 0:
+            base_unit = product.get("base_unit")
+            normalized_unit_qty = _normalize_amount(unit_quantity, base_unit)
+            cost_total = buying_price * ((normalized_unit_qty * qty) / 1000.0)
+        else:
+            cost_total = buying_price * qty
 
         if unit_label or variant_name:
             # For unit-based & variant products the resolved unit_price
@@ -313,7 +358,6 @@ def checkout_pos(
             selling_price = float(product.get("price", 0))
 
         subtotal = selling_price * qty
-        cost_total = buying_price * qty
         profit = subtotal - cost_total
 
         total_base += subtotal
@@ -390,6 +434,26 @@ def checkout_pos(
     }
 
     db.orders.insert_one(order)
+
+    customer_account_result = None
+    if payment_method == "credit":
+        customer_account_result = apply_credit_sale_to_account(
+            db,
+            credit_customer_id,
+            round2(total),
+            order_id,
+            user_id=operator["_id"],
+        )
+        db.orders.update_one(
+            {"_id": order_id},
+            {"$set": {
+                "credit_customer_id": credit_customer_id,
+                "customer_account": customer_account_result,
+            }},
+        )
+        order["credit_customer_id"] = credit_customer_id
+        order["customer_account"] = customer_account_result
+
     remember_idempotency(scope, idempotency_key, order_id)
 
     audit_log(
@@ -418,4 +482,5 @@ def checkout_pos(
         "profit": round2(total_profit),
         "payment_status": payment_status,
         "status": status,
+        "customer_account": customer_account_result,
     }

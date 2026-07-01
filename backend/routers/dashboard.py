@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
+from backend.services.subscription_service import get_subscription
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -22,12 +23,14 @@ def dashboard_overview(user=Depends(require_roles("admin", "owner"))):
     shop_ids = [s["_id"] for s in shops]
     orders = list(db.orders.find({"shop_id": {"$in": shop_ids}, "payment_status": "confirmed"}))
     payments = list(db.payments.find(payments_query))
-    active_subscriptions = db.subscriptions.count_documents(subscriptions_query)
+    subscription_rows = [get_subscription(db, s["_id"]) for s in shops]
+    active_subscriptions = sum(1 for r in subscription_rows if r["active"])
 
     plan_breakdown = {
-        "pos": sum(1 for s in shops if s.get("subscription_plan") == "pos"),
-        "online": sum(1 for s in shops if s.get("subscription_plan") == "online"),
-        "legacy": sum(1 for s in shops if s.get("subscription_plan") == "legacy"),
+        "trial": sum(1 for r in subscription_rows if r["plan"] == "trial"),
+        "pos": sum(1 for r in subscription_rows if r["plan"] == "pos"),
+        "pos_online": sum(1 for r in subscription_rows if r["plan"] == "pos_online"),
+        "expired": sum(1 for r in subscription_rows if r["status"] == "expired"),
     }
 
     revenue = sum(float(o.get("total", 0)) for o in orders if o.get("payment_status") == "confirmed")
@@ -67,8 +70,8 @@ def subscription_overview(user=Depends(require_roles("admin"))):
         "active": db.subscriptions.count_documents({"status": "active"}),
         "inactive": db.subscriptions.count_documents({"status": {"$ne": "active"}}),
         "plans": {
+            "trial": db.subscriptions.count_documents({"plan": "trial"}),
             "pos": db.subscriptions.count_documents({"plan": "pos"}),
-            "online": db.subscriptions.count_documents({"plan": "online"}),
-            "legacy": db.subscriptions.count_documents({"plan": "legacy"}),
+            "pos_online": db.subscriptions.count_documents({"plan": "pos_online"}),
         },
     }

@@ -91,6 +91,49 @@ function ProductsPage({ shopId }) {
     return `${p.stock ?? 0}`;
   };
 
+  // Compute low-stock state matching the backend analyzer so the inventory
+  // list can highlight items that need attention.
+  const computeLowStock = (p) => {
+    const threshold = Number(p.low_stock_threshold ?? 5);
+    if (
+      p.product_type === "unit_based" &&
+      Array.isArray(p.selling_units) &&
+      p.selling_units.length > 0
+    ) {
+      const base = Number(p.base_stock_quantity || 0);
+      const sizes = p.selling_units
+        .map((u) => Number(u.quantity || 0))
+        .filter((n) => n > 0);
+      if (!sizes.length) return null;
+      const smallest = Math.min(...sizes);
+      const packs = smallest > 0 ? Math.floor(base / smallest) : 0;
+      if (packs <= 0)
+        return { tone: "red", label: "Sold out" };
+      if (packs <= threshold)
+        return { tone: "amber", label: `Only ${packs} packs left` };
+      return null;
+    }
+    if (
+      p.product_type === "variant" &&
+      Array.isArray(p.variants) &&
+      p.variants.length > 0
+    ) {
+      const lows = p.variants.filter(
+        (v) => Number(v.stock || 0) <= threshold,
+      );
+      if (!lows.length) return null;
+      const allOut = lows.every((v) => Number(v.stock || 0) <= 0);
+      const label = lows
+        .map((v) => `${v.name} (${Number(v.stock || 0)})`)
+        .join(", ");
+      return { tone: allOut ? "red" : "amber", label };
+    }
+    const s = Number(p.stock || 0);
+    if (s <= 0) return { tone: "red", label: "Sold out" };
+    if (s <= threshold) return { tone: "amber", label: `Only ${s} left` };
+    return null;
+  };
+
   const renderTypeBadge = (p) => {
     if (
       p.product_type === "unit_based" &&
@@ -223,6 +266,31 @@ function ProductsPage({ shopId }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <b style={{ color: "#0f172a" }}>{p.name}</b>
             {renderTypeBadge(p)}
+            {(() => {
+              const ls = computeLowStock(p);
+              if (!ls) return null;
+              const palette =
+                ls.tone === "red"
+                  ? { bg: "#fee2e2", fg: "#991b1b", icon: "🔴" }
+                  : { bg: "#fef3c7", fg: "#92400e", icon: "🟠" };
+              return (
+                <span
+                  data-testid={`inventory-lowstock-${p._id}`}
+                  style={{
+                    background: palette.bg,
+                    color: palette.fg,
+                    fontSize: 11,
+                    padding: "2px 6px",
+                    borderRadius: 6,
+                    fontWeight: 700,
+                    marginLeft: 6,
+                  }}
+                  title={ls.label}
+                >
+                  {palette.icon} {ls.label}
+                </span>
+              );
+            })()}
 
             <div
               style={{ fontSize: 13, color: "#334155", marginTop: 2 }}

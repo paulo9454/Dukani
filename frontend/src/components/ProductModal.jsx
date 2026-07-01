@@ -34,7 +34,7 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
       { label: "", quantity: 0, price: 0 },
     ],
     variants: [                    // [{ name, stock, price }]
-      { name: "", stock: 0, price: 0 },
+      { name: "", stock: 0, buying_price: 0, price: 0 },
     ],
   });
   
@@ -76,8 +76,8 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
           ? product.selling_units.map((u) => ({ label: u.label || "", quantity: Number(u.quantity || 0), price: Number(u.price || 0) }))
           : [{ label: "", quantity: 0, price: 0 }],
         variants: (product.variants && product.variants.length)
-          ? product.variants.map((v) => ({ name: v.name || "", stock: Number(v.stock || 0), price: Number(v.price || 0) }))
-          : [{ name: "", stock: 0, price: 0 }],
+          ? product.variants.map((v) => ({ name: v.name || "", stock: Number(v.stock || 0), buying_price: Number(v.buying_price || product.buying_price || 0), price: Number(v.price || 0) }))
+          : [{ name: "", stock: 0, buying_price: 0, price: 0 }],
       });
     } else {
       setForm({
@@ -211,6 +211,7 @@ if (form.product_type === "variant") {
         .map((v) => ({
           name: v.name,
           stock: Number(v.stock || 0),
+            buying_price: Number(v.buying_price || form.cost_per_unit || 0),
           price: Number(v.price || 0),
         })),
     ),
@@ -406,50 +407,88 @@ if (image) {
         onChange={(e) => update("base_stock_quantity", Number(e.target.value))}
       />
     </div>
-    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>Selling units</div>
-    {(form.selling_units || []).map((u, i) => (
-      <div
-        key={i}
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
-      >
-        <input
-          placeholder="Label (e.g. 250g)"
-          value={u.label}
-          onChange={(e) => {
-            const next = [...form.selling_units];
-            next[i] = { ...next[i], label: e.target.value };
-            update("selling_units", next);
-          }}
-        />
-        <input
-          type="number"
-          placeholder={`Qty in ${form.base_unit}`}
-          value={u.quantity || ""}
-          onChange={(e) => {
-            const next = [...form.selling_units];
-            next[i] = { ...next[i], quantity: Number(e.target.value) };
-            update("selling_units", next);
-          }}
-        />
-        <input
-          type="number"
-          placeholder="Price KES"
-          value={u.price || ""}
-          onChange={(e) => {
-            const next = [...form.selling_units];
-            next[i] = { ...next[i], price: Number(e.target.value) };
-            update("selling_units", next);
-          }}
-        />
-        <button
-          type="button"
-          onClick={() => update("selling_units", form.selling_units.filter((_, j) => j !== i))}
-          style={{ background: "#fee2e2", border: "none", borderRadius: 6, cursor: "pointer" }}
-        >
-          ✕
-        </button>
+      <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>
+        Selling sizes / units
       </div>
-    ))}
+      {(form.selling_units || []).map((u, i) => (
+        <div
+          key={i}
+          style={{
+            border: "1px solid #e2e8f0",
+            borderRadius: 10,
+            padding: 10,
+            marginBottom: 10,
+            background: "#f8fafc",
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+            Selling unit #{i + 1}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <label style={{ fontSize: 12, fontWeight: 700 }}>
+              Label
+              <input
+                placeholder="e.g. 500g"
+                value={u.label}
+                onChange={(e) => {
+                  const next = [...form.selling_units];
+                  next[i] = { ...next[i], label: e.target.value };
+                  update("selling_units", next);
+                }}
+                style={{ width: "100%", marginTop: 4 }}
+              />
+            </label>
+
+            <label style={{ fontSize: 12, fontWeight: 700 }}>
+              Quantity in {form.base_unit}
+              <input
+                type="number"
+                placeholder="e.g. 500"
+                value={u.quantity || ""}
+                onChange={(e) => {
+                  const next = [...form.selling_units];
+                  next[i] = { ...next[i], quantity: Number(e.target.value) };
+                  update("selling_units", next);
+                }}
+                style={{ width: "100%", marginTop: 4 }}
+              />
+            </label>
+
+            <label style={{ fontSize: 12, fontWeight: 700 }}>
+              Selling price
+              <input
+                type="number"
+                placeholder="e.g. 100"
+                value={u.price || ""}
+                onChange={(e) => {
+                  const next = [...form.selling_units];
+                  next[i] = { ...next[i], price: Number(e.target.value) };
+                  update("selling_units", next);
+                }}
+                style={{ width: "100%", marginTop: 4 }}
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => update("selling_units", form.selling_units.filter((_, j) => j !== i))}
+            style={{
+              marginTop: 8,
+              background: "#fee2e2",
+              color: "#991b1b",
+              border: "none",
+              borderRadius: 6,
+              cursor: "pointer",
+              padding: "6px 10px",
+              fontWeight: 700,
+            }}
+          >
+            Remove selling unit
+          </button>
+        </div>
+      ))}
     <button
       type="button"
       data-testid="add-selling-unit"
@@ -473,7 +512,7 @@ if (image) {
     {(form.variants || []).map((v, i) => (
       <div
         key={i}
-        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
+        style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
       >
         <input
           placeholder="Variant (e.g. Medium)"
@@ -494,9 +533,19 @@ if (image) {
             update("variants", next);
           }}
         />
+          <input
+            type="number"
+            placeholder="Buying Price"
+            value={v.buying_price || ""}
+            onChange={(e) => {
+              const next = [...form.variants];
+              next[i] = { ...next[i], buying_price: Number(e.target.value) };
+              update("variants", next);
+            }}
+          />
         <input
           type="number"
-          placeholder="Price KES"
+          placeholder="Selling Price"
           value={v.price || ""}
           onChange={(e) => {
             const next = [...form.variants];
@@ -519,7 +568,7 @@ if (image) {
       onClick={() =>
         update("variants", [
           ...(form.variants || []),
-          { name: "", stock: 0, price: 0 },
+          { name: "", stock: 0, buying_price: 0, price: 0 },
         ])
       }
       style={{ background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, padding: "6px 10px", cursor: "pointer", fontWeight: 700 }}

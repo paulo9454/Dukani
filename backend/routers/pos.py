@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from backend.core.deps import get_current_user, require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
+from backend.services.subscription_service import require_pos, get_subscription
 from backend.schemas.order import POSCheckoutRequest
 from backend.services.checkout import checkout_pos
 from backend.services.safe_query import safe_str
@@ -12,47 +13,26 @@ router = APIRouter()
 
 # =========================
 # 🔥 SUBSCRIPTION CHECK
-# =========================
+# Centralized through SubscriptionService.
 def check_shop_access(shop_id: str):
     db = get_db()
-
-    sub = db.subscriptions.find_one({"shop_id": shop_id})
-    if not sub:
-        raise HTTPException(status_code=403, detail="No subscription")
-
-    now = datetime.utcnow()
-
-    # 🟢 FREE TRIAL — POS + Online for 30 days from shop creation.
-    if sub.get("plan") in {"trial_pos", "trial_pos_online"}:
-        trial_end = sub.get("trial_end")
-        # Stored as ISO string going forward; legacy datetimes still work.
-        if isinstance(trial_end, str):
-            try:
-                trial_end_dt = datetime.fromisoformat(trial_end.replace("Z", "+00:00")).replace(tzinfo=None)
-            except ValueError:
-                trial_end_dt = None
-        else:
-            trial_end_dt = trial_end
-        if trial_end_dt and trial_end_dt > now:
-            online = sub.get("plan") == "trial_pos_online"
-            return {"pos": True, "online": online, "trial": True}
-
+    sub = get_subscription(db, shop_id)
+    if not sub["features"]["pos"]:
         raise HTTPException(
             status_code=403,
-            detail="Your free trial has expired. Please subscribe to continue.",
+            detail="POS access inactive. Please subscribe to continue.",
         )
-
-    # 💳 PAID PLANS
-    if sub.get("is_paid"):
-        if sub.get("plan") == "pos":
-            return {"pos": True, "online": False}
-
-        if sub.get("plan") == "pos_online":
-            return {"pos": True, "online": True}
-
-    raise HTTPException(status_code=403, detail="Subscription inactive")
+    return {
+        "pos": sub["features"]["pos"],
+        "online": sub["features"]["online"],
+        "trial": sub["is_trial"],
+        "status": sub["status"],
+        "plan": sub["plan"],
+        "days_left": sub["days_left"],
+    }
 
 
+# =========================
 # =========================
 # 🔒 SHOP RESOLUTION
 # =========================

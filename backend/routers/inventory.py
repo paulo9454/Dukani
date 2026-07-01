@@ -56,18 +56,63 @@ def low_stock(
     db = get_db()
     assert_shop_access(user, shop_id)
 
-    products = list(
-        db.products.find({
-            "shop_id": shop_id,
-            "stock": {"$lte": threshold},
-        })
-    )
+    products = list(db.products.find({"shop_id": shop_id}))
+    low_items = []
+    for p in products:
+        ptype = p.get("product_type") or "standard"
+        prod_threshold = int(p.get("low_stock_threshold", threshold) or threshold)
+
+        if ptype == "unit_based":
+            base_qty = float(p.get("base_stock_quantity", 0) or 0)
+            units = p.get("selling_units") or []
+            unit_qtys = [
+                float(u.get("quantity") or 0)
+                for u in units
+                if float(u.get("quantity") or 0) > 0
+            ]
+            smallest = min(unit_qtys) if unit_qtys else 0
+            packs_left = int(base_qty // smallest) if smallest else 0
+            if packs_left <= prod_threshold:
+                p["_low_stock_remaining"] = packs_left
+                p["_low_stock_label"] = (
+                    "sold out" if packs_left <= 0 else f"{packs_left} packs left"
+                )
+                low_items.append(p)
+        elif ptype == "variant":
+            low_variants = []
+            for v in p.get("variants") or []:
+                v_stock = int(v.get("stock", 0) or 0)
+                v_threshold = int(
+                    v.get("low_stock_threshold", prod_threshold) or prod_threshold,
+                )
+                if v_stock <= v_threshold:
+                    low_variants.append(
+                        {
+                            "name": v.get("name"),
+                            "stock": v_stock,
+                            "threshold": v_threshold,
+                        }
+                    )
+            if low_variants:
+                p["_low_variants"] = low_variants
+                p["_low_stock_label"] = ", ".join(
+                    f"{lv['name']} ({lv['stock']})" for lv in low_variants
+                )
+                low_items.append(p)
+        else:
+            stock = int(p.get("stock", 0) or 0)
+            if stock <= prod_threshold:
+                p["_low_stock_remaining"] = stock
+                p["_low_stock_label"] = (
+                    "sold out" if stock <= 0 else f"{stock} left"
+                )
+                low_items.append(p)
 
     return {
         "shop_id": shop_id,
         "threshold": threshold,
-        "count": len(products),
-        "low_stock_items": products,
+        "count": len(low_items),
+        "low_stock_items": low_items,
     }
 
 
@@ -177,7 +222,7 @@ def inventory_summary(
 @router.post("/restock")
 def restock_product(
     payload: dict,
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
 

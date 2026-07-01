@@ -2,25 +2,16 @@ from fastapi import APIRouter, Query, HTTPException
 from backend.db.mongo import get_db
 from backend.services.geo import haversine_km
 from backend.services.slug import slugify, ensure_unique_slug
+from backend.services.subscription_service import get_subscription
 from datetime import datetime, timezone
 
 router = APIRouter(prefix="/api/public", tags=["Marketplace"])
 
 
 # =========================
-# PLAN HELPERS
+# ONLINE ACCESS
 # =========================
-ONLINE_PLANS = ("pos_online", "online", "enterprise", "trial_pos_online")
-
-# MongoDB filter for "this shop is allowed to sell online" — applied at the
-# database level so we never pull `mpesa_*` secrets just to filter in Python.
-ONLINE_ELIGIBLE_FILTER = {
-    "$or": [
-        {"subscription_plan": {"$in": list(ONLINE_PLANS)}},
-        {"is_online_enabled": True},
-        {"online_enabled": True},
-    ]
-}
+ONLINE_ELIGIBLE_FILTER = {}
 
 # Public-safe shop projection — exclude all secrets (consumer keys, passkey)
 # even from the in-memory document so we cannot accidentally leak them.
@@ -32,52 +23,12 @@ PUBLIC_SHOP_PROJECTION = {
 
 
 def _online_eligible(shop: dict) -> bool:
-    plan = shop.get("subscription_plan")
-    # Trial plans must still be within the 30-day window.
-    if plan == "trial_pos_online":
-        end = shop.get("trial_end_at")
-        if end:
-            try:
-                end_dt = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
-                if end_dt.tzinfo is None:
-                    end_dt = end_dt.replace(tzinfo=timezone.utc)
-                if end_dt > datetime.now(timezone.utc):
-                    return True
-            except ValueError:
-                pass
-        return False
-    if plan in ONLINE_PLANS:
-        return True
-    if shop.get("is_online_enabled") or shop.get("online_enabled"):
-        # Legacy boolean — only honour for paid plans, not stale trials.
-        if plan in {"pos_online", "online", "enterprise"}:
-            return True
-        # Fallback below will validate against subscriptions.
-    # 🛟 Fallback: a paid pos_online subscription exists for this shop
-    # (covers the case where activation flipped the subscription record but
-    # the denormalized shop doc fields drifted — saves the storefront from
-    # going dark when Paystack succeeded but the post-charge update was
-    # partial).
+    db = get_db()
     try:
-        db = get_db()
-        sub = db.subscriptions.find_one(
-            {"shop_id": shop.get("_id"), "is_paid": True, "plan": "pos_online"},
-            {"_id": 0, "plan": 1, "is_paid": 1},
-        )
-        if sub:
-            # Self-heal the shop doc so the next request hits the fast path.
-            db.shops.update_one(
-                {"_id": shop["_id"]},
-                {"$set": {
-                    "subscription_plan": "pos_online",
-                    "online_enabled": True,
-                    "is_online_enabled": True,
-                }},
-            )
-            return True
-    except Exception:
-        pass
-    return False
+        sub = get_subscription(db, shop["_id"])
+        return bool(sub["features"]["online"])
+    except HTTPException:
+        return False
 
 
 def _ensure_slug(db, shop: dict) -> str:

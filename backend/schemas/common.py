@@ -5,7 +5,7 @@ from typing import Literal
 # 🔥 FIX: simplified POS role system (customer + owner only)
 RoleType = Literal["customer", "owner", "shopkeeper", "admin", "partner"]
 
-PlanType = Literal["pos", "online", "legacy"]
+PlanType = Literal["trial", "pos", "pos_online"]
 
 
 class Message(BaseModel):

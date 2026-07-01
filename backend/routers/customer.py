@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
 from backend.schemas.order import CartItemInput
+from backend.services.subscription_service import get_subscription
 
 router = APIRouter(prefix="/api/customer", tags=["customer"])
 
@@ -10,7 +11,14 @@ router = APIRouter(prefix="/api/customer", tags=["customer"])
 # 🔒 ONLINE SELL CHECK
 # =========================
 def can_sell_online(shop):
-    return shop.get("subscription_plan") in ["online", "enterprise"]
+    if not shop:
+        return False
+    db = get_db()
+    try:
+        sub = get_subscription(db, shop["_id"])
+        return bool(sub["features"]["online"])
+    except HTTPException:
+        return False
 
 
 # =========================

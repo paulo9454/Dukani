@@ -15,6 +15,8 @@ import uuid
 from backend.core.deps import require_roles, get_assigned_shop_ids
 from backend.db.mongo import get_db
 from backend.services.audit import audit_log
+from backend.services.credit_ledger import add_credit_ledger_entry
+from backend.services.customer_accounts import add_customer_value, ensure_account_shape
 
 router = APIRouter(prefix="/api/credits", tags=["credits"])
 
@@ -271,6 +273,35 @@ def repay(
     return _serialize(result)
 
 
+
+# =========================================================
+# 📒 EXCEL-STYLE LEDGER ENTRY
+# =========================================================
+@router.post("/{credit_id}/ledger-entry")
+def ledger_entry(
+    credit_id: str,
+    payload: dict = Body(...),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+):
+    credit = _load_credit_for(user, credit_id)
+    db = get_db()
+
+    entry = add_credit_ledger_entry(db, credit, payload, user)
+
+    audit_log(
+        "credit_ledger_entry",
+        actor_id=user["_id"],
+        metadata={
+            "credit_id": credit_id,
+            "type": entry.get("type"),
+            "amount": entry.get("amount"),
+            "running_balance": entry.get("running_balance"),
+        },
+    )
+
+    return entry
+
+
 # =========================================================
 # 📜 TRANSACTION HISTORY
 # =========================================================
@@ -281,10 +312,103 @@ def transactions(
 ):
     _load_credit_for(user, credit_id)
     db = get_db()
-    rows = list(
+    payment_rows = list(
         db.credit_payments_history.find(
             {"$or": [{"credit_id": credit_id}, {"ledger_id": credit_id}]},
             {"_id": 1, "amount": 1, "method": 1, "reference": 1, "type": 1, "created_at": 1},
+        ).sort("created_at", -1).limit(100)
+    )
+
+    ledger_rows = list(
+        db.credit_ledger.find(
+            {"$or": [{"credit_id": credit_id}, {"ledger_id": credit_id}]},
+            {
+                "_id": 1,
+                "type": 1,
+                "amount": 1,
+                "signed_amount": 1,
+                "voucher_count": 1,
+                "voucher_value": 1,
+                "description": 1,
+                "date": 1,
+                "running_balance": 1,
+                "created_at": 1,
+            },
+        ).sort("created_at", -1).limit(100)
+    )
+
+    rows = payment_rows + ledger_rows
+    rows.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+    return rows[:100]
+
+
+
+# =========================================================
+# 🧾 CUSTOMER ACCOUNT VALUE — cash/mpesa/voucher deposits
+# =========================================================
+@router.post("/{credit_id}/account-value")
+def add_account_value(
+    credit_id: str,
+    payload: dict = Body(...),
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+):
+    credit = _load_credit_for(user, credit_id)
+    db = get_db()
+    ensure_account_shape(db, credit)
+
+    source = payload.get("source")
+    amount = payload.get("amount")
+
+    # Voucher deposits can calculate amount from voucher_count × voucher_value.
+    voucher_count = payload.get("voucher_count")
+    voucher_value = payload.get("voucher_value")
+    if source == "voucher_deposit" and not amount:
+        try:
+            amount = float(voucher_count or 0) * float(voucher_value or 0)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="voucher_count and voucher_value must be numbers")
+        if amount <= 0:
+            raise HTTPException(status_code=400, detail="Voucher amount must be greater than 0")
+
+    tx = add_customer_value(
+        db,
+        credit_id,
+        amount=amount,
+        source=source,
+        user_id=user["_id"],
+        voucher_count=voucher_count,
+        voucher_value=voucher_value,
+        description=(payload.get("description") or "").strip() or None,
+    )
+
+    audit_log(
+        "customer_account_value_added",
+        actor_id=user["_id"],
+        metadata={
+            "credit_id": credit_id,
+            "source": source,
+            "amount": tx.get("amount"),
+        },
+    )
+
+    updated = db.credit_customers.find_one({"_id": credit_id})
+    return {
+        "transaction": tx,
+        "account": _serialize(updated),
+    }
+
+
+@router.get("/{credit_id}/account-transactions")
+def account_transactions(
+    credit_id: str,
+    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+):
+    _load_credit_for(user, credit_id)
+    db = get_db()
+    rows = list(
+        db.customer_account_transactions.find(
+            {"account_id": credit_id},
+            {"_id": 1, "type": 1, "source": 1, "amount": 1, "description": 1, "metadata": 1, "created_at": 1},
         ).sort("created_at", -1).limit(100)
     )
     return rows

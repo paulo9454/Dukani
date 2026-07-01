@@ -4,6 +4,7 @@ import DEFAULT_CATEGORIES, { categoryLabel } from "../../constants/categories";
 import ProductImage from "../../components/ProductImage";
 import CreditorsPanel from "../../components/CreditorsPanel";
 import { formatBaseStock } from "../../utils/productTypes";
+import { toast } from "../../utils/toast";
 import "../../receipt.css";
 
 function PosApp({ user, shopId }) {
@@ -251,7 +252,7 @@ const loadCategories = useCallback(async () => {
     setCreditFormOpen(false);
   } catch (err) {
     console.error(err.response?.data);
-    alert(err.response?.data?.detail || "Failed to create creditor");
+    toast(err.response?.data?.detail || "Failed to create creditor");
   }
 };
 
@@ -259,18 +260,18 @@ const loadCategories = useCallback(async () => {
   const checkout = async () => {
     try {
     if (creditLimitExceeded) {
-  alert(
-    `Credit limit exceeded. Available: KES ${availableCredit}, Total: KES ${subtotal}`
+  toast(
+    `Credit limit exceeded. Available: KES ${availableCredit}`,
   );
   return;
 }
       const idempotencyKey = Date.now().toString();
       if (paymentMethod === "mpesa" && !mpesaPhone) {
-  alert("Enter M-Pesa phone number");
+  toast("Enter M-Pesa phone number");
   return;
 }
 if (paymentMethod === "cash" && Number(cashReceived) < subtotal) {
-  alert("Insufficient cash");
+  toast("Insufficient cash received");
   return;
 }
 
@@ -313,8 +314,14 @@ if (paymentMethod === "cash" && Number(cashReceived) < subtotal) {
       setCreditor(null);
       setCashReceived("");
     } catch (err) {
-      console.error(err.response?.data);
-      alert(JSON.stringify(err.response?.data?.detail || "Checkout failed"));
+      const detail = err.response?.data?.detail;
+      const msg =
+        typeof detail === "string"
+          ? detail
+          : Array.isArray(detail) && detail[0]?.msg
+          ? detail[0].msg
+          : "Checkout failed. Please try again.";
+      toast(msg, { duration: 4000 });
     }
   };
 
@@ -323,15 +330,37 @@ if (paymentMethod === "cash" && Number(cashReceived) < subtotal) {
   paymentMethod === "cash"
     ? Number(cashReceived || 0) - subtotal
     : 0;
-  const availableCredit =
-  paymentMethod === "credit" && creditor
-    ? (creditor.credit_limit || 0) - (creditor.balance || 0)
+  const customerDebt = creditor
+    ? Number(creditor.debt_balance ?? creditor.balance ?? 0)
+    : 0;
+  const customerBalance = creditor
+    ? Number(creditor.customer_balance ?? 0)
+    : 0;
+  const voucherBalance = creditor
+    ? Number(creditor.voucher_balance ?? 0)
+    : 0;
+  const voucherCount = creditor
+    ? Number(creditor.voucher_count ?? 0)
     : 0;
 
-const creditLimitExceeded =
-  paymentMethod === "credit" &&
-  creditor &&
-  subtotal > availableCredit;
+  const projectedCustomerBalanceUsed =
+    paymentMethod === "credit" && creditor
+      ? Math.min(customerBalance, subtotal)
+      : 0;
+  const projectedAfterCustomerBalance =
+    paymentMethod === "credit" && creditor
+      ? Math.max(subtotal - projectedCustomerBalanceUsed, 0)
+      : 0;
+  const projectedVoucherUsed =
+    paymentMethod === "credit" && creditor
+      ? Math.min(voucherBalance, projectedAfterCustomerBalance)
+      : 0;
+  const projectedDebtAdded =
+    paymentMethod === "credit" && creditor
+      ? Math.max(subtotal - projectedCustomerBalanceUsed - projectedVoucherUsed, 0)
+      : 0;
+
+  const creditLimitExceeded = false;
 
 useEffect(() => {
   if (paymentMethod === "cash") {
@@ -418,7 +447,7 @@ useEffect(() => {
               cursor: "pointer",
             }}
           >
-            💳 Creditors
+            💳 Customer Accounts
           </button>
         </div>
 
@@ -639,7 +668,7 @@ useEffect(() => {
     borderRadius: 6,
   }}
 >
-  ➕ Create Creditor
+  ➕ Create Customer
 </button>
         
 
@@ -721,7 +750,7 @@ useEffect(() => {
         borderRadius: 6
       }}
     >
-      Save Creditor
+      Save Customer
     </button>
   </div>
 )}
@@ -729,18 +758,6 @@ useEffect(() => {
         <hr />
 
         <h2>KES {subtotal}</h2>
-        {paymentMethod === "credit" && creditor && (
-  <div style={{
-    marginTop: 8,
-    padding: 8,
-    borderRadius: 6,
-    background: creditLimitExceeded ? "#ffe5e5" : "#e7f7e7",
-    color: creditLimitExceeded ? "red" : "green"
-  }}>
-    Available Credit: KES {availableCredit}
-  </div>
-)}
-
       {/* 💳 PAYMENT MODES (Shopify style tabs) */}
 <div style={{
   display: "flex",
@@ -797,7 +814,7 @@ useEffect(() => {
     borderRadius: 8,
     marginBottom: 10
   }}>
-    <small>Select Credit Customer</small>
+    <small>Select Customer</small>
 
     <select
       onChange={(e) =>
@@ -814,12 +831,31 @@ useEffect(() => {
       <option value="">Select customer</option>
       {creditors.map((c) => (
         <option key={c._id} value={c._id}>
-          {c.name} | Limit: {c.credit_limit} | Due: {c.balance}
+            {c.name} | Debt: {c.debt_balance ?? c.balance ?? 0} | Cash: {c.customer_balance ?? 0} | Voucher: {c.voucher_balance ?? 0}
         </option>
       ))}
     </select>
   </div>
 )}
+          {paymentMethod === "credit" && creditor && (
+    <div style={{ marginTop: 8, padding: 10, borderRadius: 8, background: "#f1f5f9", color: "#0f172a", border: "1px solid #e2e8f0" }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Customer Account</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, fontSize: 13 }}>
+        <div>Debt: <b>KES {customerDebt.toLocaleString()}</b></div>
+        <div>Stored Cash: <b>KES {customerBalance.toLocaleString()}</b></div>
+        <div>Voucher Value: <b>KES {voucherBalance.toLocaleString()}</b></div>
+        <div>Voucher Count: <b>{voucherCount.toLocaleString()}</b></div>
+      </div>
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #cbd5e1", fontSize: 13 }}>
+        <div>Sale total: <b>KES {subtotal.toLocaleString()}</b></div>
+        <div>Stored cash used: <b>KES {projectedCustomerBalanceUsed.toLocaleString()}</b></div>
+        <div>Voucher value used: <b>KES {projectedVoucherUsed.toLocaleString()}</b></div>
+        <div>Debt added: <b>KES {projectedDebtAdded.toLocaleString()}</b></div>
+      </div>
+    </div>
+  )}
+
+
 {/* 📱 M-PESA INPUT (Shopify style) */}
 {/* 💵 CASH INPUT (Shopify style) */}
 {paymentMethod === "cash" && (

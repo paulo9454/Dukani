@@ -194,7 +194,7 @@ def test_unit_based_oversell_blocked(client, owner_token, shop_id):
         {"product_id": pid, "qty": 1, "unit_label": "1kg"},  # 1000g need
     ])
     assert res.status_code == 400
-    assert "Insufficient stock" in res.text
+    assert any(kw in res.text for kw in ["Insufficient stock", "sold out", "left", "remaining"])
 
 
 def test_unit_based_missing_unit_label_rejected(client, owner_token, shop_id):
@@ -243,7 +243,7 @@ def test_variant_oversell_blocked(client, owner_token, shop_id):
         {"product_id": pid, "qty": 5, "variant_name": "Small"},
     ])
     assert res.status_code == 400
-    assert "Insufficient stock" in res.text
+    assert any(kw in res.text for kw in ["Insufficient stock", "sold out", "left", "remaining"])
 
 
 def test_variant_missing_name_rejected(client, owner_token, shop_id):

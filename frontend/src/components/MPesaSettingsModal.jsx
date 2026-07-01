@@ -141,9 +141,22 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0, color: "#0f172a" }}>
             💳 M-Pesa settings
-            {current?.mpesa_configured && (
-              <span style={configuredChip}>Configured</span>
-            )}
+            {(() => {
+              if (!current) return null;
+              const status = computeMpesaStatus(current);
+              return (
+                <span
+                  data-testid={`mpesa-status-${status.code}`}
+                  style={{
+                    ...statusChipBase,
+                    background: status.bg,
+                    color: status.fg,
+                  }}
+                >
+                  {status.icon} {status.label}
+                </span>
+              );
+            })()}
           </h2>
           <button onClick={onClose} style={closeBtn} data-testid="mpesa-settings-close">
             ✕
@@ -153,6 +166,38 @@ export default function MPesaSettingsModal({ open, shop, onClose, onSaved }) {
           Customers pay directly into your M-Pesa PayBill / Till. Keys come
           from the Safaricom Daraja portal.
         </p>
+
+        {current && !loading && (() => {
+          const status = computeMpesaStatus(current);
+          if (status.code === "ready") return null;
+          return (
+            <div
+              data-testid="mpesa-missing-hint"
+              style={{
+                padding: 10,
+                background: status.code === "none" ? "#fef2f2" : "#fffbeb",
+                border: `1px solid ${status.code === "none" ? "#fecaca" : "#fde68a"}`,
+                borderRadius: 10,
+                marginBottom: 12,
+                fontSize: 13,
+                color: "#0f172a",
+                lineHeight: 1.5,
+              }}
+            >
+              <b>{status.title}</b>
+              <div style={{ marginTop: 4, color: "#475569" }}>
+                {status.hint}
+              </div>
+              {status.missing.length > 0 && (
+                <ul style={{ margin: "6px 0 0 18px", padding: 0, color: "#b45309" }}>
+                  {status.missing.map((m) => (
+                    <li key={m}>{m}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })()}
 
         {loading ? (
           <p>Loading…</p>
@@ -487,3 +532,84 @@ const configuredChip = {
   borderRadius: 999,
   verticalAlign: "middle",
 };
+
+const statusChipBase = {
+  marginLeft: 8,
+  fontSize: 11,
+  fontWeight: 700,
+  padding: "3px 8px",
+  borderRadius: 999,
+  verticalAlign: "middle",
+  letterSpacing: 0.2,
+};
+
+/**
+ * Translate the GET /mpesa-settings payload into a single onboarding state
+ * the UI can render. We deliberately compute on the frontend so the badge
+ * logic is colocated with its consumer (and so that adding new fields
+ * doesn't require a backend deploy).
+ */
+export function computeMpesaStatus(current) {
+  const stk = {
+    "Consumer key": Boolean(current?.mpesa_consumer_key_masked),
+    "Consumer secret": Boolean(current?.mpesa_consumer_secret_masked),
+    "Passkey": Boolean(current?.mpesa_passkey_masked),
+    "Till / PayBill shortcode": Boolean(current?.mpesa_shortcode),
+  };
+  const stkComplete = Object.values(stk).every(Boolean);
+  const stkPartial = Object.values(stk).some(Boolean) && !stkComplete;
+  const hasManual = Boolean(
+    current?.mpesa_till_number || current?.mpesa_paybill_number,
+  );
+  const env = current?.mpesa_env === "production" ? "Live" : "Sandbox";
+
+  if (stkComplete) {
+    return {
+      code: "ready",
+      icon: "🟢",
+      label: `M-Pesa Ready · ${env}`,
+      bg: "#dcfce7",
+      fg: "#15803d",
+      title: "M-Pesa is ready",
+      hint: "STK push will work for online customers. Manual fallback is also available in POS.",
+      missing: [],
+    };
+  }
+  if (stkPartial) {
+    const missing = Object.entries(stk)
+      .filter(([, v]) => !v)
+      .map(([k]) => k);
+    return {
+      code: "incomplete",
+      icon: "🟡",
+      label: "Incomplete Setup",
+      bg: "#fef3c7",
+      fg: "#92400e",
+      title: "Almost there — a few fields are still missing.",
+      hint: "Add the missing keys from your Daraja dashboard so customers can pay instantly.",
+      missing,
+    };
+  }
+  if (hasManual) {
+    return {
+      code: "manual_only",
+      icon: "🟡",
+      label: "Manual Only",
+      bg: "#fef3c7",
+      fg: "#92400e",
+      title: "Manual M-Pesa works in POS only.",
+      hint: "Add Daraja keys to also accept STK push from online customers.",
+      missing: ["Consumer key", "Consumer secret", "Passkey", "Till / PayBill shortcode"],
+    };
+  }
+  return {
+    code: "none",
+    icon: "🔴",
+    label: "Not Configured",
+    bg: "#fee2e2",
+    fg: "#991b1b",
+    title: "M-Pesa is not configured yet.",
+    hint: "Add your Daraja keys (consumer key, consumer secret, passkey) plus your Till or PayBill shortcode. Get them from developer.safaricom.co.ke.",
+    missing: ["Consumer key", "Consumer secret", "Passkey", "Till / PayBill shortcode"],
+  };
+}

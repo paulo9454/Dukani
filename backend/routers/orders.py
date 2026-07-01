@@ -194,6 +194,7 @@ from fastapi import Body, Request
 from backend.db.mongo import get_db as _get_db
 from backend.core.deps import get_current_user_optional
 from backend.services.checkout import reserve_stock as _reserve_stock
+from backend.services.subscription_service import get_subscription
 from backend.services.analytics import (
     track_event as _track,
     is_duplicate_order as _dup_check,
@@ -207,10 +208,12 @@ import uuid as _uuid
 def _online_ok(shop: dict) -> bool:
     if not shop:
         return False
-    plan = shop.get("subscription_plan")
-    if plan in {"pos_online", "online", "enterprise"}:
-        return True
-    return bool(shop.get("is_online_enabled") or shop.get("online_enabled"))
+    db = _get_db()
+    try:
+        sub = get_subscription(db, shop["_id"])
+        return bool(sub["features"]["online"])
+    except HTTPException:
+        return False
 
 
 @router.post("/create")

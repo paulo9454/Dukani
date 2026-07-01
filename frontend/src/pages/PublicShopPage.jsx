@@ -3,6 +3,7 @@ import API from "../api/client";
 import CheckoutModal from "../components/CheckoutModal";
 import DEFAULT_CATEGORIES, { categoryLabel } from "../constants/categories";
 import ProductImage from "../components/ProductImage";
+import { toast } from "../utils/toast";
 
 /**
  * Public Shop Page — Shopify-style /shop/:slug
@@ -17,6 +18,7 @@ export default function PublicShopPage({ slug }) {
   const [pickerChoice, setPickerChoice] = useState({});
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [activeCategory, setActiveCategory] = useState("all");
+  const [cartCollapsed, setCartCollapsed] = useState(false);
 
   // Track-order tile state
   const [trackPhone, setTrackPhone] = useState("");
@@ -121,6 +123,15 @@ export default function PublicShopPage({ slug }) {
   const removeFromCart = (lineId) =>
     setCart((prev) => prev.filter((x) => x._lineId !== lineId));
 
+  const changeQty = (lineId, delta) =>
+    setCart((prev) =>
+      prev
+        .map((x) =>
+          x._lineId === lineId ? { ...x, qty: Math.max(0, x.qty + delta) } : x,
+        )
+        .filter((x) => x.qty > 0),
+    );
+
   const cartTotal = cart.reduce(
     (sum, x) => sum + Number(x.price || 0) * x.qty,
     0
@@ -174,7 +185,13 @@ export default function PublicShopPage({ slug }) {
     );
 
   return (
-    <div style={shellStyle}>
+    <div
+      style={{
+        ...shellStyle,
+        paddingBottom:
+          cart.length > 0 && !cartCollapsed ? 320 : cart.length > 0 ? 80 : 0,
+      }}
+    >
       {/* HEADER */}
       <div style={headerStyle}>
         <a href="/" style={{ textDecoration: "none", color: "white", display: "flex", alignItems: "center", gap: 8 }}>
@@ -550,73 +567,156 @@ export default function PublicShopPage({ slug }) {
 
       {/* CART */}
       {cart.length > 0 && (
-        <div style={cartStyle}>
-          <b>Cart ({cart.length})</b>
-          {cart.map((c) => (
-            <div
-              key={c._lineId || c._id}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                margin: "6px 0",
-              }}
-            >
-              <span>
-                {c.qty}× {c.name}
-              </span>
-              <span>
-                {formatKES(c.price * c.qty)}{" "}
-                <button
-                  onClick={() => removeFromCart(c._lineId || c._id)}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "#dc2626",
-                    cursor: "pointer",
-                  }}
-                >
-                  ✕
-                </button>
-              </span>
-            </div>
-          ))}
+        <div
+          style={{
+            ...cartStyle,
+            maxHeight: cartCollapsed ? 56 : "70vh",
+            overflowY: cartCollapsed ? "hidden" : "auto",
+          }}
+          data-testid="public-cart"
+        >
           <div
             style={{
-              borderTop: "1px solid #e2e8f0",
-              marginTop: 6,
-              paddingTop: 6,
               display: "flex",
               justifyContent: "space-between",
-              fontWeight: 700,
-            }}
-          >
-            <span>Total</span>
-            <span>{formatKES(cartTotal)}</span>
-          </div>
-          <button
-            data-testid="public-shop-checkout"
-            onClick={() => {
-              setCheckoutOpen(true);
-              API.post("/api/analytics/track", {
-                event_type: "checkout_start",
-                shop_id: shop?._id,
-                metadata: { items: cart.length, total: cartTotal },
-              }).catch(() => {});
-            }}
-            style={{
-              marginTop: 8,
-              padding: "10px",
-              width: "100%",
-              background: "#16a34a",
-              color: "white",
-              border: "none",
-              borderRadius: 6,
+              alignItems: "center",
               cursor: "pointer",
-              fontWeight: 600,
             }}
+            onClick={() => setCartCollapsed((v) => !v)}
+            data-testid="public-cart-toggle"
           >
-            Checkout
-          </button>
+            <b>
+              🛒 Cart ({cart.reduce((s, c) => s + c.qty, 0)}) ·{" "}
+              {formatKES(cartTotal)}
+            </b>
+            <span
+              style={{ color: "#475569", fontSize: 18, lineHeight: 1 }}
+              aria-label={cartCollapsed ? "Expand cart" : "Collapse cart"}
+            >
+              {cartCollapsed ? "▲" : "▼"}
+            </span>
+          </div>
+
+          {!cartCollapsed && (
+            <>
+              <div style={{ marginTop: 8 }}>
+                {cart.map((c) => (
+                  <div
+                    key={c._lineId || c._id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "6px 0",
+                      borderBottom: "1px solid #f1f5f9",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          color: "#0f172a",
+                          fontWeight: 600,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {c.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>
+                        {formatKES(c.price)} ea
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button
+                        data-testid={`public-cart-decrease-${c._lineId || c._id}`}
+                        onClick={() =>
+                          changeQty(c._lineId || c._id, -1)
+                        }
+                        style={qtyBtnStyle}
+                        aria-label="Decrease"
+                      >
+                        −
+                      </button>
+                      <span
+                        data-testid={`public-cart-qty-${c._lineId || c._id}`}
+                        style={{
+                          minWidth: 22,
+                          textAlign: "center",
+                          fontWeight: 700,
+                          color: "#0f172a",
+                        }}
+                      >
+                        {c.qty}
+                      </span>
+                      <button
+                        data-testid={`public-cart-increase-${c._lineId || c._id}`}
+                        onClick={() =>
+                          changeQty(c._lineId || c._id, +1)
+                        }
+                        style={qtyBtnStyle}
+                        aria-label="Increase"
+                      >
+                        +
+                      </button>
+                      <button
+                        onClick={() => removeFromCart(c._lineId || c._id)}
+                        data-testid={`public-cart-remove-${c._lineId || c._id}`}
+                        style={{
+                          ...qtyBtnStyle,
+                          color: "#dc2626",
+                          marginLeft: 2,
+                        }}
+                        aria-label="Remove"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div
+                style={{
+                  borderTop: "1px solid #e2e8f0",
+                  marginTop: 6,
+                  paddingTop: 6,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontWeight: 700,
+                }}
+              >
+                <span>Total</span>
+                <span>{formatKES(cartTotal)}</span>
+              </div>
+              <button
+                data-testid="public-shop-checkout"
+                onClick={() => {
+                  setCheckoutOpen(true);
+                  API.post("/api/analytics/track", {
+                    event_type: "checkout_start",
+                    shop_id: shop?._id,
+                    metadata: { items: cart.length, total: cartTotal },
+                  }).catch(() => {});
+                }}
+                style={{
+                  marginTop: 8,
+                  padding: "10px",
+                  width: "100%",
+                  background: "#16a34a",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontWeight: 700,
+                  minHeight: 44,
+                }}
+              >
+                Checkout
+              </button>
+            </>
+          )}
         </div>
       )}
 
@@ -750,6 +850,22 @@ const cartStyle = {
   fontSize: 13,
   color: "#0f172a",
   zIndex: 50,
+};
+
+const qtyBtnStyle = {
+  width: 28,
+  height: 28,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  background: "#f1f5f9",
+  color: "#0f172a",
+  border: "1px solid #e2e8f0",
+  borderRadius: 6,
+  cursor: "pointer",
+  fontWeight: 700,
+  fontSize: 14,
+  padding: 0,
 };
 
 const pillStyle = (active) => ({

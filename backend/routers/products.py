@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.db.mongo import get_db
-from backend.core.deps import require_roles, get_assigned_shop_ids
+from backend.core.deps import require_roles, get_assigned_shop_ids, assert_shop_access
 import uuid
 import json
 from datetime import datetime
@@ -94,9 +94,10 @@ async def create_product(
     selling_units: str = Form("[]"),  # JSON-stringified list
     variants: str = Form("[]"),       # JSON-stringified list
     image: UploadFile = File(None),
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
+    assert_shop_access(user, shop_id)
 
     # Parse + sanitize selling_units / variants up front so we never
     # persist garbage that would break checkout later.
@@ -122,6 +123,7 @@ async def create_product(
                 raise HTTPException(status_code=400, detail="Each variant needs a name")
             v["stock"] = float(v.get("stock") or 0)
             v["price"] = float(v.get("price") or 0)
+            v["buying_price"] = float(v.get("buying_price") or buying_price or 0)
             v["reserved"] = 0
     elif product_type != "standard":
         raise HTTPException(status_code=400, detail="product_type must be standard | unit_based | variant")
@@ -200,16 +202,18 @@ async def update_product(
     unit_type: str = Form(None),
     conversion_factor: float = Form(None),
     image: UploadFile = File(None),
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
     product = db.products.find_one({"_id": product_id})
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
+    assert_shop_access(user, product.get("shop_id"))
+    if shop_id is not None and shop_id != product.get("shop_id"):
+        raise HTTPException(status_code=400, detail="shop_id cannot be changed here")
 
     updates = {}
     for key, val in [
-        ("shop_id", shop_id),
         ("name", name),
         ("barcode", barcode),
         ("description", description),
@@ -258,8 +262,12 @@ async def update_product(
 @router.delete("/{product_id}")
 def delete_product(
     product_id: str,
-    user=Depends(require_roles("owner", "admin", "partner", "shopkeeper")),
+    user=Depends(require_roles("owner", "admin", "partner")),
 ):
     db = get_db()
+    product = db.products.find_one({"_id": product_id})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    assert_shop_access(user, product.get("shop_id"))
     db.products.delete_one({"_id": product_id})
     return {"message": "Product deleted"}

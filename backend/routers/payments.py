@@ -253,8 +253,8 @@ def _activate_subscription(payment: dict) -> bool:
             "subscription_status": "active",
             "online_enabled": online,
             "is_online_enabled": online,
-            "subscription_start": now.isoformat(),
-            "subscription_end": end.isoformat(),
+              "subscription_start": now.isoformat(),
+              "subscription_end": end.isoformat(),
             "subscription_last_reference": payment.get("reference"),
         }},
     )
@@ -266,8 +266,8 @@ def _activate_subscription(payment: dict) -> bool:
             "status": "active",
             "is_paid": True,
             "payment_reference": payment.get("reference"),
-            "start": now.isoformat(),
-            "end": end.isoformat(),
+              "subscription_start": now.isoformat(),
+              "subscription_end": end.isoformat(),
             "updated_at": now.isoformat(),
         }},
         upsert=True,
@@ -296,7 +296,11 @@ def paystack_verify(
 
     db = get_db()
     record = db.payments.find_one({"reference": ref})
-    if record and record.get("status") in {"success", "failed"}:
+    if not record:
+        raise HTTPException(status_code=404, detail="Unknown payment reference")
+    if record.get("provider") != "paystack":
+        raise HTTPException(status_code=400, detail="Payment reference is not Paystack")
+    if record.get("status") in {"success", "failed"}:
         # Idempotent — return the recorded status
         return {
             "verified": record["status"] == "success",
@@ -308,7 +312,7 @@ def paystack_verify(
             "idempotent": True,
         }
 
-    status = "success"
+    status = "failed"
     if _paystack_live():
         try:
             resp = httpx.get(
@@ -317,14 +321,33 @@ def paystack_verify(
                 timeout=15,
             )
             data = resp.json()
-            paystack_status = (data.get("data") or {}).get("status")
-            status = "success" if paystack_status == "success" else "failed"
+            tx = data.get("data") or {}
+            paystack_status = tx.get("status")
+            provider_amount = float(tx.get("amount") or 0) / 100.0
+            provider_currency = tx.get("currency")
+            expected_amount = float(record.get("amount") or 0)
+            expected_currency = record.get("currency") or "KES"
+            if (
+                paystack_status == "success"
+                and round(provider_amount, 2) == round(expected_amount, 2)
+                and provider_currency == expected_currency
+            ):
+                status = "success"
+            else:
+                logger.warning(
+                    "paystack verify mismatch ref=%s provider_status=%s provider_amount=%s provider_currency=%s expected_amount=%s expected_currency=%s",
+                    ref, paystack_status, provider_amount, provider_currency, expected_amount, expected_currency,
+                )
+                status = "failed"
         except Exception as exc:
             logger.exception("paystack verify exception: %s", exc)
             status = "failed"
     else:
-        # Dev fallback — references starting with FAIL/fail simulate failure.
-        status = "failed" if str(ref).lower().startswith("fail") else "success"
+        if os.getenv("DUKAYKO_DEV", "").strip().lower() in {"1", "true", "yes"}:
+            # Explicit dev-only fallback — references starting with FAIL/fail simulate failure.
+            status = "failed" if str(ref).lower().startswith("fail") else "success"
+        else:
+            raise HTTPException(status_code=503, detail="Paystack verification is not configured")
 
     db.payments.update_one(
         {"reference": ref},
@@ -333,7 +356,6 @@ def paystack_verify(
             "verified_at": _now_iso(),
             "verified_by": user["_id"] if user else None,
         }},
-        upsert=True,
     )
     _mark_order_payment((record or {}).get("order_id"), status, "card", "paystack")
 
@@ -381,6 +403,11 @@ async def paystack_webhook(
     if not reference:
         return {"ok": True}
 
+    record = db.payments.find_one({"reference": reference})
+    if not record:
+        logger.warning("paystack webhook unknown reference=%s", reference)
+        return {"ok": True, "ignored": "unknown_reference"}
+
     already, record = _idempotent_settle(reference, "success" if event == "charge.success" else "failed")
     if already:
         return {"ok": True, "idempotent": True}
@@ -395,7 +422,6 @@ async def paystack_webhook(
             "webhook_at": _now_iso(),
             "webhook_payload": payload,
         }},
-        upsert=True,
     )
     # If Paystack's metadata has a subscription_plan + shop_id we flip the
     # shop's plan here. Helper is idempotent and will no-op if already done

@@ -54,22 +54,24 @@ def seed_full_data():
     shopkeeper_a = db.users.find_one({"email": "keeper.a@dukani.dev"})["_id"]
     shopkeeper_b = db.users.find_one({"email": "keeper.b@dukani.dev"})["_id"]
 
-    shop_main = str(uuid.uuid4())
-    shop_branch = str(uuid.uuid4())
+    existing_main = db.shops.find_one({"slug": "seed-main-shop"}, {"_id": 1})
+    existing_branch = db.shops.find_one({"slug": "seed-branch-shop"}, {"_id": 1})
+    shop_main = existing_main["_id"] if existing_main else str(uuid.uuid4())
+    shop_branch = existing_branch["_id"] if existing_branch else str(uuid.uuid4())
     from datetime import datetime, timezone, timedelta
     now_dt = datetime.now(timezone.utc)
     now = now_dt.isoformat()
     trial_end = (now_dt + timedelta(days=30)).isoformat()
     shops = [
         {
-            "_id": shop_main, "name": "Seed Main Shop", "owner_id": owner_id,
+            "_id": shop_main, "name": "Seed Main Shop", "slug": "seed-main-shop", "owner_id": owner_id,
             "subscription_plan": "pos_online",
             "online_enabled": True, "is_online_enabled": True, "pos_enabled": True,
             "subscription_status": "active",
             "trial_start_at": now, "trial_end_at": trial_end,
         },
         {
-            "_id": shop_branch, "name": "Seed Branch Shop", "owner_id": owner_id,
+            "_id": shop_branch, "name": "Seed Branch Shop", "slug": "seed-branch-shop", "owner_id": owner_id,
             "subscription_plan": "pos_online",
             "online_enabled": True, "is_online_enabled": True, "pos_enabled": True,
             "subscription_status": "active",

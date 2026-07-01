@@ -1,11 +1,17 @@
+from backend.db.mongo import get_db
+from backend.services.subscription_service import get_subscription
+from fastapi import HTTPException
+
 def is_shop_online(shop: dict) -> bool:
     if not shop:
         return False
 
-    return bool(
-        shop.get("online_enabled", False)
-        or shop.get("subscription_plan") == "online"
-    )
+    db = get_db()
+    try:
+        sub = get_subscription(db, shop["_id"])
+        return bool(sub["features"]["online"])
+    except HTTPException:
+        return False
 
 
 def is_product_visible(product: dict, shop: dict, mode: str = "pos") -> bool:

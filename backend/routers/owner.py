@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
+from backend.services.subscription_service import get_subscription
 import os
 import uuid
 from datetime import datetime, timedelta
@@ -55,7 +56,7 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
         "name": name,
         "slug": slug,
         "owner_id": user["_id"],
-        "subscription_plan": "trial_pos_online",
+        "subscription_plan": "trial",
         # Trial includes BOTH POS and online so owners can experience the
         # full product before paying.
         "online_enabled": True,
@@ -77,7 +78,7 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
         {"shop_id": shop_id},
         {"$set": {
             "shop_id": shop_id,
-            "plan": "trial_pos_online",
+            "plan": "trial",
             "status": "trial",
             "trial_start": now.isoformat(),
             "trial_end": trial_end.isoformat(),
@@ -421,13 +422,15 @@ def get_sales(user=Depends(require_roles("owner", "admin", "partner"))):
     else:
         shops = list(db.shops.find({}, {"_id": 1, "name": 1, "subscription_plan": 1}))
 
-    shop_by_id = {
-        s["_id"]: {
+    shop_by_id = {}
+    for s in shops:
+        sub = get_subscription(db, s["_id"])
+        shop_by_id[s["_id"]] = {
             "name": s.get("name") or s["_id"],
-            "plan": s.get("subscription_plan") or "legacy",
+            "plan": sub["plan"],
+            "can_use_online": sub["features"]["online"],
         }
-        for s in shops
-    }
+
     shop_ids = list(shop_by_id.keys())
 
     orders = list(
@@ -471,11 +474,11 @@ def get_sales(user=Depends(require_roles("owner", "admin", "partner"))):
     for o in orders:
         sid = o["shop_id"]
         amount = float(o.get("total", 0))
-        meta = shop_by_id.get(sid, {"name": sid, "plan": "legacy"})
+        meta = shop_by_id.get(sid, {"name": sid, "plan": "expired", "can_use_online": False})
         online_flag = is_online_order(o)
 
         # Rule: online sales only counted for shops on a plan that includes online
-        counts_online = online_flag and meta["plan"] in {"pos_online", "online", "enterprise"}
+        counts_online = online_flag and bool(meta.get("can_use_online"))
 
         if counts_online:
             total_online += amount

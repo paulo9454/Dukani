@@ -5,6 +5,37 @@ import { shareOnWhatsApp, copyShopLink } from "../../../utils/share";
 import { toast } from "../../../utils/toast";
 import { redirectTop } from "../../../utils/navigate";
 
+// Compact M-Pesa onboarding badge for shop cards. Source of truth is the
+// MPesaSettingsModal — this version is a lightweight read-only mirror.
+function shopMpesaBadge(shop) {
+  const stkOk = Boolean(
+    shop?.mpesa_consumer_key &&
+      shop?.mpesa_consumer_secret &&
+      shop?.mpesa_passkey &&
+      shop?.mpesa_shortcode,
+  );
+  const stkPartial =
+    !stkOk &&
+    Boolean(
+      shop?.mpesa_consumer_key ||
+        shop?.mpesa_consumer_secret ||
+        shop?.mpesa_passkey ||
+        shop?.mpesa_shortcode,
+    );
+  const hasManual = Boolean(shop?.mpesa_till_number || shop?.mpesa_paybill_number);
+
+  if (stkOk) {
+    return { code: "ready", icon: "🟢", label: "M-Pesa Ready", bg: "#dcfce7", fg: "#15803d" };
+  }
+  if (stkPartial) {
+    return { code: "incomplete", icon: "🟡", label: "Incomplete", bg: "#fef3c7", fg: "#92400e" };
+  }
+  if (hasManual) {
+    return { code: "manual_only", icon: "🟡", label: "Manual only", bg: "#fef3c7", fg: "#92400e" };
+  }
+  return { code: "none", icon: "🔴", label: "Not configured", bg: "#fee2e2", fg: "#991b1b" };
+}
+
 function Shops({ search = "" }) {
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -400,9 +431,31 @@ function Shops({ search = "" }) {
                         padding: "8px 12px",
                         cursor: "pointer",
                         borderRadius: 6,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
                       }}
                     >
                       💳 M-Pesa settings
+                      {(() => {
+                        const b = shopMpesaBadge(shop);
+                        return (
+                          <span
+                            data-testid={`mpesa-badge-${shop._id}-${b.code}`}
+                            style={{
+                              background: b.bg,
+                              color: b.fg,
+                              fontSize: 10,
+                              fontWeight: 700,
+                              padding: "2px 6px",
+                              borderRadius: 999,
+                              letterSpacing: 0.2,
+                            }}
+                          >
+                            {b.icon} {b.label}
+                          </span>
+                        );
+                      })()}
                     </button>
                     <button
                       onClick={() => deleteShop(shop._id)}
