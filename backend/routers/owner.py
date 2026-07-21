@@ -36,7 +36,20 @@ def list_owner_shops(user=Depends(require_roles("owner", "admin", "partner"))):
     db = get_db()
     query = {"owner_id": user["_id"]} if user["role"] in {"owner", "partner"} else {}
     shops = list(db.shops.find(query))
-    return [_normalize_id(s) for s in shops]
+
+    normalized = []
+    for shop in shops:
+        sub = get_subscription(db, shop["_id"])
+        shop["subscription_plan"] = sub["plan"]
+        shop["subscription_status"] = sub["status"]
+        shop["online_enabled"] = bool(sub["features"]["online"])
+        shop["is_online_enabled"] = bool(sub["features"]["online"])
+        shop["pos_enabled"] = bool(sub["features"]["pos"])
+        shop["subscription_days_left"] = sub["days_left"]
+        shop["subscription_features"] = sub["features"]
+        normalized.append(_normalize_id(shop))
+
+    return normalized
 
 
 @router.post("/shops")
