@@ -1,27 +1,32 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+"""Legacy SMTP helper.
 
-# =========================
-# CONFIG (USE GMAIL EXAMPLE)
-# =========================
-EMAIL_HOST = "smtp.gmail.com"
-EMAIL_PORT = 587
-EMAIL_USER = "paulmose77@gmail.com"
-EMAIL_PASS = "zrxx ctml zxzu bkfq"  # NOT your normal password
+Credentials must be supplied through environment variables; never commit secrets.
+The main application email flow uses backend.services.email_service.
+"""
+import os
+import smtplib
+import ssl
+from email.message import EmailMessage
 
 
 def send_email(to_email: str, subject: str, html_content: str):
-    msg = MIMEMultipart()
-    msg["From"] = EMAIL_USER
+    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER", "")
+    password = os.getenv("SMTP_PASSWORD", "")
+    sender = os.getenv("SMTP_FROM", user)
+
+    if not sender or not user or not password:
+        raise RuntimeError("SMTP is not configured; set SMTP_USER, SMTP_PASSWORD and SMTP_FROM")
+
+    msg = EmailMessage()
+    msg["From"] = sender
     msg["To"] = to_email
     msg["Subject"] = subject
+    msg.add_alternative(html_content, subtype="html")
 
-    msg.attach(MIMEText(html_content, "html"))
-
-    server = smtplib.SMTP(EMAIL_HOST, EMAIL_PORT)
-    server.starttls()
-    server.login(EMAIL_USER, EMAIL_PASS)
-
-    server.sendmail(EMAIL_USER, to_email, msg.as_string())
-    server.quit()
+    context = ssl.create_default_context()
+    with smtplib.SMTP(host, port, timeout=15) as server:
+        server.starttls(context=context)
+        server.login(user, password)
+        server.send_message(msg)
