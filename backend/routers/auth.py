@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from backend.db.mongo import get_db
-from backend.schemas.auth import RegisterRequest, LoginRequest, RefreshRequest
+from backend.schemas.auth import RegisterRequest, LoginRequest, RefreshRequest, ForgotPasswordRequest, ResetPasswordRequest
 from backend.core.security import (
     hash_password,
     verify_password,
@@ -10,10 +10,13 @@ from backend.core.security import (
 )
 from backend.core.deps import get_current_user
 from backend.services.audit import audit_log
-from backend.services.email_service import send_verification_email, is_email_enabled
+from backend.services.email_service import send_verification_email, send_password_reset_email, is_email_enabled
 from datetime import datetime, timezone, timedelta
 import random
 import uuid
+import hashlib
+import secrets
+import os
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -218,6 +221,80 @@ def login(payload: LoginRequest):
         "token_type": "bearer",
         "user": _user_response(user),
     }
+
+
+@router.post("/forgot-password")
+def forgot_password(payload: ForgotPasswordRequest):
+    """Send a short-lived password reset link without revealing account existence."""
+    generic_message = "If an account exists for that email, a password reset link has been sent."
+    if not is_email_enabled():
+        return {"message": generic_message}
+
+    db = get_db()
+    email = payload.email.lower()
+    user = db.users.find_one({"email": email})
+    if not user or user.get("is_active") is False:
+        return {"message": generic_message}
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=30)
+
+    # Keep only one active reset token per user; the raw token is never stored.
+    db.password_reset_tokens.delete_many({"user_id": user["_id"]})
+    db.password_reset_tokens.insert_one({
+        "_id": str(uuid.uuid4()),
+        "user_id": user["_id"],
+        "token_hash": token_hash,
+        "created_at": now,
+        "expires_at": expires_at,
+    })
+
+    frontend_url = os.getenv("FRONTEND_URL", "https://www.dukayko.com").rstrip("/")
+    reset_url = f"{frontend_url}/reset-password?token={raw_token}"
+    result = send_password_reset_email(email, reset_url)
+    if not result.get("sent"):
+        # Remove an unusable token and keep the response generic.
+        db.password_reset_tokens.delete_one({"token_hash": token_hash})
+    return {"message": generic_message}
+
+
+@router.post("/reset-password")
+def reset_password(payload: ResetPasswordRequest):
+    """Consume a one-time reset token and update the account password."""
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+    if len(payload.new_password) > 72:
+        raise HTTPException(status_code=400, detail="Password must be 72 characters or fewer")
+
+    token_hash = hashlib.sha256(payload.token.encode("utf-8")).hexdigest()
+    now = datetime.now(timezone.utc)
+    db = get_db()
+    reset_record = db.password_reset_tokens.find_one_and_delete({
+        "token_hash": token_hash,
+        "expires_at": {"$gt": now},
+    })
+    if not reset_record:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired. Request a new link.")
+
+    user_id = reset_record["user_id"]
+    update = db.users.update_one(
+        {"_id": user_id, "is_active": {"$ne": False}},
+        {"$set": {"password_hash": hash_password(payload.new_password),
+                  "password_updated_at": now.isoformat()}},
+    )
+    if not update.matched_count:
+        raise HTTPException(status_code=400, detail="This password reset link is invalid or has expired. Request a new link.")
+
+    # Invalidate all refresh sessions after a successful password change.
+    db.refresh_tokens.update_many(
+        {"user_id": user_id, "revoked": False},
+        {"$set": {"revoked": True, "revoked_at": now.isoformat()}},
+    )
+    db.password_reset_tokens.delete_many({"user_id": user_id})
+    audit_log("auth_password_reset", actor_id=user_id, status="success")
+    return {"message": "Your password has been reset. You can now sign in."}
 
 
 @router.get("/me")
