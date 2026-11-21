@@ -19,6 +19,10 @@ class RateLimiterMiddleware(BaseHTTPMiddleware):
         # Auth
         if path.startswith("/api/auth/register"):
             return 5, 60
+        if path.startswith("/api/auth/forgot-password"):
+            return 3, 60
+        if path.startswith("/api/auth/reset-password"):
+            return 5, 60
         if path.startswith("/api/auth/login"):
             return 10, 60
         if path.startswith("/api/auth/verify-email") or path.startswith("/api/auth/resend-verification"):
