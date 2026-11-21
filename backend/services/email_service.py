@@ -1,68 +1,65 @@
-"""Pluggable email service.
-
-Currently uses SMTP via stdlib smtplib. Falls back to a no-op log if SMTP env
-vars are not configured, so registration/verification flows still work in dev.
-
-Swap providers (SendGrid, Resend, etc.) by reimplementing `_send_raw` only.
-"""
+""""Pluggable email service using Resend's HTTPS API."""
 from __future__ import annotations
 
+import json
 import os
-import smtplib
-import ssl
-from email.message import EmailMessage
 from typing import Optional
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
-def _smtp_configured() -> bool:
-    # Gmail SMTP requires authenticated credentials; fail closed if any are missing.
-    return all(os.getenv(key) for key in ("SMTP_HOST", "SMTP_FROM", "SMTP_USER", "SMTP_PASSWORD"))
+RESEND_API_URL = "https://api.resend.com/emails"
+DEFAULT_RESEND_FROM = "Dukayko <no-reply@mail.dukayko.com>"
+
+
+def _resend_configured() -> bool:
+    return bool(os.getenv("RESEND_API_KEY") and (os.getenv("RESEND_FROM") or DEFAULT_RESEND_FROM))
 
 
 def _send_raw(to_email: str, subject: str, html_body: str, text_body: Optional[str] = None) -> dict:
-    """Send an email via SMTP. Returns {"sent": bool, "reason": str}."""
-    if not _smtp_configured():
-        # Dev fallback — log instead of sending.
-        print(f"[email_service] SMTP not configured; would send to={to_email} subject={subject!r}")
-        return {"sent": False, "reason": "smtp_not_configured"}
+    """Send an email through Resend. Returns {"sent": bool, "reason": str}."""
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        print("[email_service] RESEND_API_KEY is not configured; email not sent")
+        return {"sent": False, "reason": "resend_not_configured"}
 
-    host = os.getenv("SMTP_HOST")
-    raw_port = os.getenv("SMTP_PORT", "587")
-    try:
-        port = int(raw_port)
-    except (TypeError, ValueError):
-        print(f"[email_service] SMTP_PORT={raw_port!r} is not numeric; defaulting to 587")
-        port = 587
-    user = os.getenv("SMTP_USER")
-    password = os.getenv("SMTP_PASSWORD")
-    sender = os.getenv("SMTP_FROM") or user
-    use_tls = os.getenv("SMTP_TLS", "true").lower() != "false"
-
-    msg = EmailMessage()
-    msg["Subject"] = subject
-    msg["From"] = sender
-    msg["To"] = to_email
+    payload = {
+        "from": os.getenv("RESEND_FROM", DEFAULT_RESEND_FROM),
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
     if text_body:
-        msg.set_content(text_body)
-    msg.add_alternative(html_body, subtype="html")
+        payload["text"] = text_body
+
+    request = Request(
+        RESEND_API_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "Dukayko/1.0",
+        },
+        method="POST",
+    )
 
     try:
-        if use_tls:
-            ctx = ssl.create_default_context()
-            with smtplib.SMTP(host, port, timeout=15) as srv:
-                srv.starttls(context=ctx)
-                if user and password:
-                    srv.login(user, password)
-                srv.send_message(msg)
-        else:
-            with smtplib.SMTP_SSL(host, port, timeout=15) as srv:
-                if user and password:
-                    srv.login(user, password)
-                srv.send_message(msg)
-        return {"sent": True, "reason": "ok"}
+        with urlopen(request, timeout=20) as response:
+            response.read()
+            if 200 <= response.status < 300:
+                return {"sent": True, "reason": "ok"}
+            print(f"[email_service] Resend returned HTTP {response.status}")
+            return {"sent": False, "reason": f"resend_http_{response.status}"}
+    except HTTPError as exc:
+        # Do not log the request payload, recipient, or API key.
+        print(f"[email_service] Resend rejected email with HTTP {exc.code}")
+        return {"sent": False, "reason": f"resend_http_{exc.code}"}
+    except (URLError, TimeoutError, OSError) as exc:
+        print(f"[email_service] Resend connection failed: {type(exc).__name__}")
+        return {"sent": False, "reason": "resend_connection_error"}
     except Exception as exc:
-        print(f"[email_service] SMTP send failed: {exc}")
-        return {"sent": False, "reason": f"smtp_error:{exc}"}
+        print(f"[email_service] Resend send failed: {type(exc).__name__}")
+        return {"sent": False, "reason": "resend_error"}
 
 
 def send_verification_email(email: str, code: str) -> dict:
@@ -84,7 +81,7 @@ def send_verification_email(email: str, code: str) -> dict:
 
 
 def send_order_confirmation(email: str, order: dict) -> dict:
-    subject = f"Dukayko order #{order.get('_id', '')[:8]} received"
+    subject = f"Dukayko order #{str(order.get('_id', ''))[:8]} received"
     items_html = "".join(
         f"<tr><td>{i.get('quantity') or i.get('qty')}× {i.get('name')}</td>"
         f"<td style='text-align:right'>KES {i.get('subtotal')}</td></tr>"
@@ -107,8 +104,7 @@ def send_order_confirmation(email: str, order: dict) -> dict:
 
 
 def is_email_enabled() -> bool:
-    return _smtp_configured()
-
+    return _resend_configured()
 
 
 def send_password_reset_email(email: str, reset_url: str) -> dict:
