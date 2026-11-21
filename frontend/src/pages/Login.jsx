@@ -89,6 +89,10 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
           </p>
         )}
 
+        <p style={{ textAlign: "right", margin: "10px 0 0", fontSize: 13 }}>
+          <a href="/forgot-password" style={linkBtn}>Forgot password?</a>
+        </p>
+
         <button
           data-testid="login-submit"
           onClick={handleLogin}
