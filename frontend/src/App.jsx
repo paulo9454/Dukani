@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import API from "./api/client";
 
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
