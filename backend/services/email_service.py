@@ -15,7 +15,8 @@ from typing import Optional
 
 
 def _smtp_configured() -> bool:
-    return bool(os.getenv("SMTP_HOST")) and bool(os.getenv("SMTP_FROM"))
+    # Gmail SMTP requires authenticated credentials; fail closed if any are missing.
+    return all(os.getenv(key) for key in ("SMTP_HOST", "SMTP_FROM", "SMTP_USER", "SMTP_PASSWORD"))
 
 
 def _send_raw(to_email: str, subject: str, html_body: str, text_body: Optional[str] = None) -> dict:
@@ -107,3 +108,24 @@ def send_order_confirmation(email: str, order: dict) -> dict:
 
 def is_email_enabled() -> bool:
     return _smtp_configured()
+
+
+
+def send_password_reset_email(email: str, reset_url: str) -> dict:
+    subject = "Reset your Dukayko password"
+    html = f"""
+    <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#0f172a;">
+      <h2 style="color:#16a34a;">Reset your Dukayko password</h2>
+      <p>We received a request to reset the password for your Dukayko account.</p>
+      <p><a href="{reset_url}" style="display:inline-block;padding:12px 18px;background:#16a34a;color:#fff;text-decoration:none;border-radius:8px;">Reset password</a></p>
+      <p>This link expires in 30 minutes and can only be used once.</p>
+      <p>If you did not request this, you can safely ignore this email.</p>
+      <p style="color:#64748b;font-size:12px;">Dukayko · Sell. Track. Grow.</p>
+    </div>
+    """
+    text = (
+        "We received a request to reset your Dukayko password. "
+        f"Open this link within 30 minutes: {reset_url} "
+        "If you did not request this, ignore this email."
+    )
+    return _send_raw(email, subject, html, text)
