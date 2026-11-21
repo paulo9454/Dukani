@@ -1,4 +1,4 @@
-""""Pluggable email service using Resend's HTTPS API."""
+"""Pluggable email service using Resend's HTTPS API."""
 from __future__ import annotations
 
 import json
