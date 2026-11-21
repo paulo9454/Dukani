@@ -131,6 +131,12 @@ function App() {
   }, [token]);
 
   // =========================
+  // PUBLIC ROUTES — password recovery (must work without authentication)
+  // =========================
+  if (path === "/forgot-password") return <ForgotPassword />;
+  if (path === "/reset-password") return <ResetPassword />;
+
+  // =========================
   // PUBLIC ROUTE — /shop/:slug (no auth required)
   // =========================
   if (path.startsWith("/shop/")) {
