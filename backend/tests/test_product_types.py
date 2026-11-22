@@ -373,3 +373,42 @@ def test_restock_rejects_invalid_quantity_and_unknown_variant(client, owner_toke
               "buying_price": 5, "total_cost": 5},
     )
     assert missing_variant.status_code == 404
+
+def test_standard_restock_retries_when_checkout_changes_stock_concurrently(
+    client, owner_token, shop_id, monkeypatch,
+):
+    pid = _create(
+        client, owner_token, shop_id=shop_id, name="Concurrent Restock",
+        price=60, buying_price=20, stock=10,
+    ).json()["_id"]
+    db = get_db()
+    original_update_one = db.products.update_one
+    simulated_checkout = {"done": False}
+
+    def update_with_interleaved_sale(query, update, *args, **kwargs):
+        if not simulated_checkout["done"] and "$inc" in update and "stock" in update["$inc"]:
+            simulated_checkout["done"] = True
+            # Simulate checkout completing after restock read its snapshot but
+            # before its compare-and-set update reaches MongoDB.
+            original_update_one(
+                {"_id": pid, "shop_id": shop_id},
+                {"$inc": {"stock": -2, "reserved": 2}},
+            )
+        return original_update_one(query, update, *args, **kwargs)
+
+    monkeypatch.setattr(db.products, "update_one", update_with_interleaved_sale)
+    res = client.post(
+        "/api/inventory/restock",
+        headers=_auth(owner_token),
+        json={"product_id": pid, "qty": 5, "buying_price": 30, "total_cost": 150},
+    )
+    assert res.status_code == 200, res.text
+    saved = db.products.find_one({"_id": pid})
+    assert simulated_checkout["done"] is True
+    assert saved["stock"] == 13  # 10 - 2 sold + 5 restocked
+    assert saved["reserved"] == 2
+    assert saved["buying_price"] == 23.85
+    assert db.inventory_movements.count_documents({
+        "product_id": pid, "type": "RESTOCK",
+    }) == 1
+
