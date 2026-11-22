@@ -250,6 +250,11 @@ def restock_product(
     if not (total_cost > 0):
         raise HTTPException(400, "Total cost must be greater than zero")
 
+    # Compare-and-set retries keep the weighted buying price in sync with the
+    # exact stock/cost snapshot being updated. This prevents a concurrent sale
+    # or another restock from being overwritten by a stale read.
+    max_attempts = 10
+    response = None
     movement = {
         "_id": str(uuid.uuid4()),
         "shop_id": product.get("shop_id"),
@@ -260,110 +265,145 @@ def restock_product(
         "product_type": ptype,
     }
 
-    if ptype == "standard":
-        try:
-            qty = float(payload.get("qty"))
-            buying_price = float(payload.get("buying_price"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Valid qty and buying_price are required")
-        if qty <= 0 or buying_price <= 0:
-            raise HTTPException(400, "Quantity and buying price must be greater than zero")
+    def snapshot_condition(document, field):
+        if field in document:
+            return {field: document[field]}
+        return {field: {"$exists": False}}
 
-        old_stock = float(product.get("stock", 0) or 0)
-        old_buy = float(product.get("buying_price", 0) or 0)
-        new_stock = old_stock + qty
-        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
-        db.products.update_one(
-            {"_id": product_id, "shop_id": product["shop_id"]},
-            {"$set": {
-                "stock": new_stock,
-                "buying_price": round(new_buy, 2),
-                "updated_at": now(),
-            }},
+    for _ in range(max_attempts):
+        product = db.products.find_one(
+            {"_id": product_id, "shop_id": product["shop_id"]}
         )
-        movement.update({"qty": qty, "buying_price": round(buying_price, 2)})
-        response = {
-            "new_stock": new_stock,
-            "new_buying_price": round(new_buy, 2),
-        }
+        if not product:
+            raise HTTPException(404, "Product not found")
 
-    elif ptype == "variant":
-        variant_name = str(payload.get("variant_name") or "").strip()
-        try:
-            qty = float(payload.get("qty"))
-            buying_price = float(payload.get("buying_price"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Select a variant and enter valid quantity and buying price")
-        if not variant_name:
-            raise HTTPException(400, "variant_name required")
-        if qty <= 0 or buying_price <= 0:
-            raise HTTPException(400, "Quantity and buying price must be greater than zero")
+        if ptype == "standard":
+            try:
+                qty = float(payload.get("qty"))
+                buying_price = float(payload.get("buying_price"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Valid qty and buying_price are required")
+            if qty <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be greater than zero")
 
-        variants = product.get("variants") or []
-        variant = next((v for v in variants if v.get("name") == variant_name), None)
-        if variant is None:
-            raise HTTPException(404, "Variant not found")
-        old_stock = float(variant.get("stock", 0) or 0)
-        old_buy = float(variant.get("buying_price", product.get("buying_price", 0)) or 0)
-        new_stock = old_stock + qty
-        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
-        updated = db.products.update_one(
-            {"_id": product_id, "shop_id": product["shop_id"],
-             "variants": {"$elemMatch": {"name": variant_name}}},
-            {"$inc": {"variants.$.stock": qty},
-             "$set": {"variants.$.buying_price": round(new_buy, 2), "updated_at": now()}},
+            old_stock_raw = product.get("stock")
+            old_buy_raw = product.get("buying_price")
+            old_stock = float(old_stock_raw or 0)
+            old_buy = float(old_buy_raw or 0)
+            new_stock = old_stock + qty
+            new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+            query = {"_id": product_id, "shop_id": product["shop_id"]}
+            query.update(snapshot_condition(product, "stock"))
+            query.update(snapshot_condition(product, "buying_price"))
+            updated = db.products.update_one(
+                query,
+                {"$inc": {"stock": qty},
+                 "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+            )
+            if updated.modified_count:
+                movement.update({"qty": qty, "buying_price": round(buying_price, 2)})
+                response = {
+                    "new_stock": new_stock,
+                    "new_buying_price": round(new_buy, 2),
+                }
+                break
+
+        elif ptype == "variant":
+            variant_name = str(payload.get("variant_name") or "").strip()
+            try:
+                qty = float(payload.get("qty"))
+                buying_price = float(payload.get("buying_price"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Select a variant and enter valid quantity and buying price")
+            if not variant_name:
+                raise HTTPException(400, "variant_name required")
+            if qty <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be greater than zero")
+
+            variants = product.get("variants") or []
+            variant = next((v for v in variants if v.get("name") == variant_name), None)
+            if variant is None:
+                raise HTTPException(404, "Variant not found")
+            old_stock = float(variant.get("stock", 0) or 0)
+            old_buy = float(variant.get("buying_price", product.get("buying_price", 0)) or 0)
+            new_stock = old_stock + qty
+            new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+            variant_match = {"name": variant_name}
+            variant_match.update(snapshot_condition(variant, "stock"))
+            if "buying_price" in variant:
+                variant_match.update(snapshot_condition(variant, "buying_price"))
+            else:
+                variant_match["buying_price"] = {"$exists": False}
+            updated = db.products.update_one(
+                {"_id": product_id, "shop_id": product["shop_id"],
+                 "variants": {"$elemMatch": variant_match}},
+                {"$inc": {"variants.$.stock": qty},
+                 "$set": {"variants.$.buying_price": round(new_buy, 2), "updated_at": now()}},
+            )
+            if updated.modified_count:
+                movement.update({
+                    "qty": qty, "buying_price": round(buying_price, 2),
+                    "variant_name": variant_name,
+                })
+                response = {
+                    "variant_name": variant_name,
+                    "new_stock": new_stock,
+                    "new_buying_price": round(new_buy, 2),
+                }
+                break
+
+        elif ptype == "unit_based":
+            try:
+                base_quantity = float(payload.get("base_quantity"))
+                buying_price = float(payload.get("buying_price"))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Valid base_quantity and buying_price are required")
+            if base_quantity <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be greater than zero")
+            if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
+                raise HTTPException(400, "Product has an invalid base unit")
+
+            # Checkout values unit-based buying_price per kg/litre. Stock itself
+            # is stored in grams/ml, so convert only for the weighted-cost math.
+            old_base_raw = product.get("base_stock_quantity")
+            old_buy_raw = product.get("buying_price")
+            old_base = float(old_base_raw or 0)
+            old_buy = float(old_buy_raw or 0)
+            added_standard_units = base_quantity / 1000.0
+            old_standard_units = old_base / 1000.0
+            total_standard_units = old_standard_units + added_standard_units
+            new_buy = (
+                (old_standard_units * old_buy) + (added_standard_units * buying_price)
+            ) / total_standard_units
+            query = {"_id": product_id, "shop_id": product["shop_id"]}
+            query.update(snapshot_condition(product, "base_stock_quantity"))
+            query.update(snapshot_condition(product, "buying_price"))
+            updated = db.products.update_one(
+                query,
+                {"$inc": {"base_stock_quantity": base_quantity},
+                 "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+            )
+            if updated.modified_count:
+                movement.update({
+                    "qty": base_quantity,
+                    "base_unit": product.get("base_unit"),
+                    "buying_price": round(buying_price, 2),
+                })
+                response = {
+                    "new_base_stock_quantity": old_base + base_quantity,
+                    "new_buying_price": round(new_buy, 2),
+                    "base_unit": product.get("base_unit"),
+                }
+                break
+
+        else:
+            raise HTTPException(400, "Unsupported product type")
+
+    if response is None:
+        raise HTTPException(
+            409,
+            "Stock changed repeatedly while restocking; refresh the product and try again",
         )
-        if updated.modified_count == 0:
-            raise HTTPException(409, "Variant stock was not updated; refresh and try again")
-        movement.update({
-            "qty": qty, "buying_price": round(buying_price, 2),
-            "variant_name": variant_name,
-        })
-        response = {
-            "variant_name": variant_name,
-            "new_stock": new_stock,
-            "new_buying_price": round(new_buy, 2),
-        }
-
-    elif ptype == "unit_based":
-        try:
-            base_quantity = float(payload.get("base_quantity"))
-            buying_price = float(payload.get("buying_price"))
-        except (TypeError, ValueError):
-            raise HTTPException(400, "Valid base_quantity and buying_price are required")
-        if base_quantity <= 0 or buying_price <= 0:
-            raise HTTPException(400, "Quantity and buying price must be greater than zero")
-        if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
-            raise HTTPException(400, "Product has an invalid base unit")
-
-        # Checkout values unit-based buying_price per kg/litre. Stock itself
-        # is stored in grams/ml, so convert only for the weighted-cost math.
-        old_base = float(product.get("base_stock_quantity", 0) or 0)
-        old_buy = float(product.get("buying_price", 0) or 0)
-        added_standard_units = base_quantity / 1000.0
-        old_standard_units = old_base / 1000.0
-        total_standard_units = old_standard_units + added_standard_units
-        new_buy = (
-            (old_standard_units * old_buy) + (added_standard_units * buying_price)
-        ) / total_standard_units
-        db.products.update_one(
-            {"_id": product_id, "shop_id": product["shop_id"]},
-            {"$inc": {"base_stock_quantity": base_quantity},
-             "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
-        )
-        movement.update({
-            "qty": base_quantity,
-            "base_unit": product.get("base_unit"),
-            "buying_price": round(buying_price, 2),
-        })
-        response = {
-            "new_base_stock_quantity": old_base + base_quantity,
-            "new_buying_price": round(new_buy, 2),
-            "base_unit": product.get("base_unit"),
-        }
-
-    else:
-        raise HTTPException(400, "Unsupported product type")
 
     db.inventory_movements.insert_one(movement)
     return {
