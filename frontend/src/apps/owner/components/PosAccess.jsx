@@ -18,31 +18,31 @@ function PosAccess() {
     loadShops();
   }, []);
 
-  // =========================
-  // PLAN LOGIC aligned with backend taxonomy:
-  //   trial_pos | pos | pos_online | online | legacy
-  // =========================
-  const getPosAccess = (plan) =>
-    plan === "trial_pos" || plan === "pos" || plan === "pos_online";
+  // The backend subscription service is the single source of truth.
+  // Do not infer feature access from plan names in the frontend.
+  const getPlanLabel = (shop) => {
+    const plan = shop.subscription_plan;
+    const status = shop.subscription_status;
 
-  const getOnlineAccess = (plan) =>
-    plan === "pos_online" || plan === "online";
+    if (plan === "trial" && status === "trial") {
+      const daysLeft = shop.subscription_days_left;
+      return Number.isFinite(daysLeft)
+        ? `FREE TRIAL – ${daysLeft} ${daysLeft === 1 ? "DAY" : "DAYS"} LEFT`
+        : "FREE TRIAL";
+    }
 
-  const getBadgeStyle = (plan) => {
-    if (plan === "pos_online") return { background: "green" };
-    if (plan === "trial_pos") return { background: "#f59e0b" };
-    if (plan === "pos") return { background: "#2563eb" };
-    if (plan === "online") return { background: "#7c3aed" };
-    return { background: "gray" };
-  };
-
-  const getPlanLabel = (plan) => {
-    if (plan === "trial_pos") return "FREE POS TRIAL (14 DAYS)";
+    if (plan === "trial" || status === "expired") return "TRIAL EXPIRED";
     if (plan === "pos") return "POS ONLY";
     if (plan === "pos_online") return "FULL ACCESS (POS + ONLINE)";
-    if (plan === "online") return "ONLINE ONLY";
-    if (plan === "legacy") return "LEGACY PLAN";
-    return "UNKNOWN PLAN";
+    return plan ? plan.toUpperCase().replaceAll("_", " ") : "PLAN NOT SET";
+  };
+
+  const getBadgeStyle = (shop) => {
+    if (shop.subscription_status === "expired") return { background: "#dc2626" };
+    if (shop.subscription_plan === "trial") return { background: "#f59e0b" };
+    if (shop.subscription_plan === "pos_online") return { background: "green" };
+    if (shop.subscription_plan === "pos") return { background: "#2563eb" };
+    return { background: "gray" };
   };
 
   const launchPos = (shopId) => {
@@ -60,8 +60,9 @@ function PosAccess() {
         <p data-testid="no-shops-msg">No shops found. Create a shop first.</p>
       ) : (
         shops.map((shop) => {
-          const pos = getPosAccess(shop.subscription_plan);
-          const online = getOnlineAccess(shop.subscription_plan);
+          const features = shop.subscription_features || {};
+          const pos = features.pos === true;
+          const online = features.online === true;
 
           return (
             <div
@@ -83,7 +84,7 @@ function PosAccess() {
 
                 <span
                   style={{
-                    ...getBadgeStyle(shop.subscription_plan),
+                    ...getBadgeStyle(shop),
                     color: "white",
                     padding: "5px 10px",
                     borderRadius: 6,
@@ -91,13 +92,13 @@ function PosAccess() {
                     height: "fit-content",
                   }}
                 >
-                  {shop.subscription_plan}
+                  {getPlanLabel(shop)}
                 </span>
               </div>
 
               <div style={{ marginTop: 10 }}>
                 <p>
-                  <b>Status:</b> {getPlanLabel(shop.subscription_plan)}
+                  <b>Status:</b> {getPlanLabel(shop)}
                 </p>
 
                 <div
