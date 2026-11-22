@@ -10,7 +10,10 @@ security_optional = HTTPBearer(auto_error=False)
 # =========================
 # 🔐 GET CURRENT USER
 # =========================
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
     if not credentials:
         raise HTTPException(status_code=401, detail="Missing credentials")
 
@@ -31,6 +34,22 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     user = db.users.find_one({"_id": user_id})
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    # A shopkeeper issued a temporary password may only inspect their own
+    # session and complete the password change until the new password is set.
+    allowed_during_password_change = {
+        "/api/auth/me",
+        "/api/auth/change-password",
+    }
+    if (
+        user.get("role") == "shopkeeper"
+        and user.get("must_change_password")
+        and request.url.path not in allowed_during_password_change
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Change your temporary password before continuing",
+        )
 
     return user
 
