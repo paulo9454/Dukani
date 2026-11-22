@@ -5,6 +5,7 @@ import uuid
 import json
 from datetime import datetime
 from fastapi import UploadFile, File, Form
+from starlette.concurrency import run_in_threadpool
 import os
 
 
@@ -16,6 +17,60 @@ def _normalize_amount(amount, unit):
     return amount
 
 router = APIRouter(prefix="/api/products", tags=["products"])
+
+MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024
+ALLOWED_PRODUCT_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+def _upload_product_image_bytes(contents: bytes, shop_id: str) -> str:
+    """Store a product image in Cloudinary and return an optimized delivery URL."""
+    import cloudinary
+    from cloudinary import uploader
+    from cloudinary.utils import cloudinary_url
+
+    if not os.getenv("CLOUDINARY_URL"):
+        raise HTTPException(status_code=503, detail="Product image storage is not configured")
+
+    config = cloudinary.config(secure=True)
+    if not config.cloud_name:
+        raise HTTPException(status_code=503, detail="Product image storage is not configured")
+
+    try:
+        result = uploader.upload(
+            contents,
+            folder=f"dukayko/products/{shop_id}",
+            resource_type="image",
+            allowed_formats=["jpg", "jpeg", "png", "webp"],
+        )
+        delivery_url, _ = cloudinary_url(
+            result["public_id"],
+            secure=True,
+            transformation=[
+                {"width": 1200, "height": 1200, "crop": "limit"},
+                {"quality": "auto", "fetch_format": "auto"},
+            ],
+        )
+        return delivery_url
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Product image upload failed. Please try again.",
+        ) from exc
+
+
+async def _store_product_image(image: UploadFile, shop_id: str) -> str:
+    if image.content_type not in ALLOWED_PRODUCT_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="Use a JPG, PNG, or WebP product image")
+
+    contents = await image.read(MAX_PRODUCT_IMAGE_BYTES + 1)
+    if not contents:
+        raise HTTPException(status_code=400, detail="The selected image is empty")
+    if len(contents) > MAX_PRODUCT_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Product images must be 5 MB or smaller")
+
+    return await run_in_threadpool(_upload_product_image_bytes, contents, shop_id)
 
 
 # =========================
@@ -130,18 +185,7 @@ async def create_product(
 
     image_url = None
     if image and getattr(image, "filename", None):
-        file_ext = image.filename.split(".")[-1]
-        filename = f"{uuid.uuid4()}.{file_ext}"
-        upload_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "static",
-            "products",
-        )
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, "wb") as f:
-            f.write(await image.read())
-        image_url = f"/api/static/products/{filename}"
+        image_url = await _store_product_image(image, shop_id)
 
     product = {
         "_id": str(uuid.uuid4()),
@@ -236,18 +280,7 @@ async def update_product(
         updates["low_stock_threshold"] = int(low_stock_threshold)
 
     if image and getattr(image, "filename", None):
-        file_ext = image.filename.split(".")[-1]
-        filename = f"{uuid.uuid4()}.{file_ext}"
-        upload_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "static",
-            "products",
-        )
-        os.makedirs(upload_dir, exist_ok=True)
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, "wb") as f:
-            f.write(await image.read())
-        updates["image"] = f"/api/static/products/{filename}"
+        updates["image"] = await _store_product_image(image, product.get("shop_id"))
 
     if updates:
         updates["updated_at"] = datetime.utcnow().isoformat()
