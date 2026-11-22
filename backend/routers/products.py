@@ -245,6 +245,12 @@ async def update_product(
     low_stock_threshold: int = Form(None),
     unit_type: str = Form(None),
     conversion_factor: float = Form(None),
+    product_type: str | None = Form(None),
+    variant_label: str | None = Form(None),
+    base_unit: str | None = Form(None),
+    base_stock_quantity: float | None = Form(None),
+    selling_units: str | None = Form(None),
+    variants: str | None = Form(None),
     image: UploadFile = File(None),
     user=Depends(require_roles("owner", "admin", "partner")),
 ):
@@ -257,6 +263,7 @@ async def update_product(
         raise HTTPException(status_code=400, detail="shop_id cannot be changed here")
 
     updates = {}
+    unset_fields = {}
     for key, val in [
         ("name", name),
         ("barcode", barcode),
@@ -279,12 +286,95 @@ async def update_product(
     if low_stock_threshold is not None:
         updates["low_stock_threshold"] = int(low_stock_threshold)
 
+    # Product type data is updated as one validated group. Keep reserved
+    # quantities for variants whose names remain unchanged.
+    if product_type is not None:
+        if product_type not in {"standard", "unit_based", "variant"}:
+            raise HTTPException(status_code=400, detail="product_type must be standard | unit_based | variant")
+
+        try:
+            units_list = json.loads(selling_units or "[]") if selling_units is not None else []
+            variants_list = json.loads(variants or "[]") if variants is not None else []
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Invalid selling_units / variants JSON")
+
+        updates["product_type"] = product_type
+
+        if product_type == "variant":
+            if not variants_list:
+                raise HTTPException(status_code=400, detail="Add at least one variant")
+            old_by_name = {
+                str(v.get("name")): v for v in (product.get("variants") or [])
+            }
+            cleaned = []
+            seen_names = set()
+            for item in variants_list:
+                variant_name = str(item.get("name") or "").strip()
+                if not variant_name:
+                    raise HTTPException(status_code=400, detail="Each variant needs a name")
+                if variant_name.lower() in seen_names:
+                    raise HTTPException(status_code=400, detail=f"Duplicate variant name: {variant_name}")
+                seen_names.add(variant_name.lower())
+                variant_stock = float(item.get("stock") or 0)
+                variant_price = float(item.get("price") or 0)
+                variant_buying = float(item.get("buying_price") or buying_price or 0)
+                if variant_stock < 0 or variant_price < 0 or variant_buying < 0:
+                    raise HTTPException(status_code=400, detail="Variant stock and prices cannot be negative")
+                old = old_by_name.get(variant_name, {})
+                cleaned.append({
+                    "name": variant_name,
+                    "stock": variant_stock,
+                    "buying_price": variant_buying,
+                    "price": variant_price,
+                    "reserved": float(old.get("reserved") or 0),
+                })
+            updates["variants"] = cleaned
+            if variant_label is not None:
+                updates["variant_label"] = variant_label
+            unset_fields.update({
+                "selling_units": "",
+                "base_unit": "",
+                "base_stock_quantity": "",
+                "reserved_base": "",
+            })
+        elif product_type == "unit_based":
+            if base_unit not in {"g", "kg", "ml", "litre", "l"}:
+                raise HTTPException(status_code=400, detail="base_unit must be g, kg, ml, or litre")
+            if not units_list:
+                raise HTTPException(status_code=400, detail="Add at least one selling unit")
+            cleaned_units = []
+            for unit in units_list:
+                label = str(unit.get("label") or "").strip()
+                quantity = float(unit.get("quantity") or 0)
+                unit_price = float(unit.get("price") or 0)
+                if not label or quantity <= 0 or unit_price <= 0:
+                    raise HTTPException(status_code=400, detail="Each selling unit needs label, quantity, price")
+                cleaned_units.append({"label": label, "quantity": quantity, "price": unit_price})
+            updates["base_unit"] = base_unit
+            updates["base_stock_quantity"] = float(_normalize_amount(base_stock_quantity or 0, base_unit))
+            updates["selling_units"] = cleaned_units
+            unset_fields.update({"variants": "", "variant_label": ""})
+        else:
+            unset_fields.update({
+                "variants": "",
+                "variant_label": "",
+                "selling_units": "",
+                "base_unit": "",
+                "base_stock_quantity": "",
+                "reserved_base": "",
+            })
+
     if image and getattr(image, "filename", None):
         updates["image"] = await _store_product_image(image, product.get("shop_id"))
 
-    if updates:
+    if updates or unset_fields:
         updates["updated_at"] = datetime.utcnow().isoformat()
-        db.products.update_one({"_id": product_id}, {"$set": updates})
+        update_doc = {}
+        if updates:
+            update_doc["$set"] = updates
+        if unset_fields:
+            update_doc["$unset"] = unset_fields
+        db.products.update_one({"_id": product_id}, update_doc)
 
     return db.products.find_one({"_id": product_id})
 
