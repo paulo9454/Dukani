@@ -326,21 +326,32 @@ def create_shopkeeper(payload: dict = Body(...), user=Depends(require_roles("own
     from backend.core.security import hash_password
     db = get_db()
 
-    email = (payload.get("email") or "").strip().lower()
+    phone_raw = (payload.get("phone") or "").strip()
+    phone_digits = "".join(ch for ch in phone_raw if ch.isdigit())
     password = payload.get("password") or ""
     full_name = (payload.get("full_name") or "").strip()
 
-    if not email or not password or not full_name:
-        raise HTTPException(status_code=400, detail="full_name, email and password are required")
+    # Accept Kenyan local format (07... / 01...) or international format.
+    if phone_digits.startswith("0") and len(phone_digits) == 10:
+        phone = "+254" + phone_digits[1:]
+    elif phone_digits.startswith("254") and len(phone_digits) == 12:
+        phone = "+" + phone_digits
+    elif phone_raw.startswith("+") and 10 <= len(phone_digits) <= 15:
+        phone = "+" + phone_digits
+    else:
+        raise HTTPException(status_code=400, detail="Enter a valid phone number, e.g. 0712345678 or +254712345678")
+
+    if not full_name or not password:
+        raise HTTPException(status_code=400, detail="full_name, phone and password are required")
     if len(password) < 8:
         raise HTTPException(status_code=400, detail="password must be at least 8 characters")
-    if db.users.find_one({"email": email}):
-        raise HTTPException(status_code=400, detail="Email already registered")
+    if db.users.find_one({"phone": phone}):
+        raise HTTPException(status_code=400, detail="Phone number already registered")
 
     shopkeeper_id = str(uuid.uuid4())
     doc = {
         "_id": shopkeeper_id,
-        "email": email,
+        "phone": phone,
         "password_hash": hash_password(password),
         "full_name": full_name,
         "role": "shopkeeper",
@@ -353,7 +364,7 @@ def create_shopkeeper(payload: dict = Body(...), user=Depends(require_roles("own
         "message": "Shopkeeper created",
         "shopkeeper": {
             "_id": shopkeeper_id,
-            "email": email,
+            "phone": phone,
             "full_name": full_name,
             "role": "shopkeeper",
         },
@@ -406,6 +417,7 @@ def list_assignments(shop_id: str, user=Depends(require_roles("owner", "admin", 
             "shopkeeper_id": a["shopkeeper_id"],
             "shopkeeper_name": u.get("full_name") or u.get("name") or "",
             "shopkeeper_email": u.get("email") or "",
+            "shopkeeper_phone": u.get("phone") or "",
         })
     return {"assignments": assignments}
 
