@@ -17,6 +17,7 @@ function AssignShopkeepers() {
 
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState("");
+  const [resetCredential, setResetCredential] = useState(null);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -125,6 +126,30 @@ function AssignShopkeepers() {
       showToast("✅ Shopkeeper created — now select a shop and click Assign");
     } catch (err) {
       alert(err?.response?.data?.detail || "Failed to create shopkeeper");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resetShopkeeperPassword = async (shopkeeper) => {
+    const confirmed = window.confirm(
+      `Generate a new temporary password for ${shopkeeper.full_name || shopkeeper.name || "this shopkeeper"}? Their current password will stop working.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setLoading(true);
+      const res = await API.post(
+        `/api/owner/shopkeepers/${shopkeeper._id}/reset-password`
+      );
+      setResetCredential({
+        name: res.data?.shopkeeper?.full_name || shopkeeper.full_name || shopkeeper.name || "Shopkeeper",
+        phone: res.data?.shopkeeper?.phone || shopkeeper.phone || "",
+        password: res.data?.temporary_password || "",
+      });
+      showToast("Temporary password generated");
+    } catch (err) {
+      alert(err?.response?.data?.detail || "Could not reset shopkeeper password");
     } finally {
       setLoading(false);
     }
@@ -302,7 +327,7 @@ function AssignShopkeepers() {
           >
             <div>
               <b>{u.full_name || u.name || "Unnamed"}</b>{" "}
-              <span style={{ color: "#555" }}>({u.email})</span>
+              <span style={{ color: "#555" }}>({u.phone || "No phone number"})</span>
               {assigned && (
                 <span
                   style={{
@@ -320,6 +345,21 @@ function AssignShopkeepers() {
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
+              <button
+                data-testid={`sk-reset-${u._id}`}
+                disabled={loading}
+                onClick={() => resetShopkeeperPassword(u)}
+                style={{
+                  padding: "8px 14px",
+                  background: "#f59e0b",
+                  color: "#111827",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: loading ? "not-allowed" : "pointer",
+                }}
+              >
+                Reset password
+              </button>
               <button
                 data-testid={`sk-assign-${u._id}`}
                 disabled={loading || assigned || !selectedShop}
@@ -383,6 +423,49 @@ function AssignShopkeepers() {
           ))
         )}
       </div>
+
+      {resetCredential && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Temporary shopkeeper password"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(15, 23, 42, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: 12, padding: 22, width: "min(440px, 100%)" }}>
+            <h3 style={{ marginTop: 0 }}>Temporary password created</h3>
+            <p>Share this password privately with {resetCredential.name} ({resetCredential.phone}). It will only be shown here once.</p>
+            <div style={{ padding: 12, background: "#f1f5f9", borderRadius: 8, fontFamily: "monospace", fontSize: 18, wordBreak: "break-all" }}>
+              {resetCredential.password}
+            </div>
+            <p style={{ color: "#64748b", fontSize: 13 }}>
+              The shopkeeper must choose a new password after signing in.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                onClick={() => navigator.clipboard.writeText(resetCredential.password)}
+                style={{ padding: "9px 14px", border: 0, borderRadius: 6, background: "#2563eb", color: "#fff" }}
+              >
+                Copy password
+              </button>
+              <button
+                onClick={() => setResetCredential(null)}
+                style={{ padding: "9px 14px", border: "1px solid #cbd5e1", borderRadius: 6, background: "#fff" }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {toast && (
         <div
