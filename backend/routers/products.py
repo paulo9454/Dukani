@@ -144,6 +144,7 @@ async def create_product(
     unit_type: str = Form("piece"),
     conversion_factor: float = Form(1),
     product_type: str = Form("standard"),
+    variant_label: str = Form("Type / flavour / size"),
     base_unit: str = Form(None),
     base_stock_quantity: float = Form(0),
     selling_units: str = Form("[]"),  # JSON-stringified list
@@ -203,6 +204,7 @@ async def create_product(
         "unit_type": unit_type or "piece",
         "conversion_factor": float(conversion_factor or 1),
         "product_type": product_type,
+        "variant_label": variant_label if product_type == "variant" else None,
         "is_public": True,
         "created_at": datetime.utcnow().isoformat(),
         "created_by": user["_id"],
