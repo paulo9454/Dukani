@@ -404,6 +404,7 @@ def restock_product(
                         query,
                         {"$inc": {"base_stock_quantity": base_quantity},
                          "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+                        **session_kwargs,
                     )
                     if updated.modified_count:
                         movement.update({
