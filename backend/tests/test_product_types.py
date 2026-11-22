@@ -374,7 +374,7 @@ def test_restock_rejects_invalid_quantity_and_unknown_variant(client, owner_toke
     )
     assert missing_variant.status_code == 404
 
-def test_standard_restock_retries_when_checkout_changes_stock_concurrently(
+def test_standard_restock_rejects_stale_snapshot_when_checkout_changes_stock(
     client, owner_token, shop_id, monkeypatch,
 ):
     pid = _create(
@@ -402,15 +402,17 @@ def test_standard_restock_retries_when_checkout_changes_stock_concurrently(
         headers=_auth(owner_token),
         json={"product_id": pid, "qty": 5, "buying_price": 30, "total_cost": 150},
     )
-    assert res.status_code == 200, res.text
+    # The transaction/CAS must reject the stale stock snapshot rather than
+    # silently applying the restock using outdated stock and cost values.
+    assert res.status_code == 409, res.text
     saved = db.products.find_one({"_id": pid})
     assert simulated_checkout["done"] is True
-    assert saved["stock"] == 13  # 10 - 2 sold + 5 restocked
+    assert saved["stock"] == 8  # checkout's 2-unit deduction remains intact
     assert saved["reserved"] == 2
-    assert saved["buying_price"] == 23.85
+    assert saved["buying_price"] == 20
     assert db.inventory_movements.count_documents({
         "product_id": pid, "type": "RESTOCK",
-    }) == 1
+    }) == 0
 
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
 def test_restock_rejects_non_finite_total_cost(client, owner_token, shop_id, bad_value):
