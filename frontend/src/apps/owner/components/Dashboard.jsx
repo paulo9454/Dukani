@@ -67,9 +67,13 @@ function Dashboard() {
           const trials = shopList
             .filter((s) => s.trial_end_at || s.subscription_status === "trial")
             .map((s) => {
-              const end = s.trial_end_at ? new Date(s.trial_end_at).getTime() : 0;
-              const daysLeft = Math.max(0, Math.ceil((end - now) / 86400000));
-              const expired = end > 0 && end <= now;
+              // Use the backend's canonical subscription calculation so this
+              // banner always agrees with the POS & Subscription Access page.
+              const daysLeft = Math.max(
+                0,
+                Number(s.subscription_days_left ?? 0)
+              );
+              const expired = s.subscription_status === "expired";
               return { shop: s, daysLeft, expired };
             });
           setTrialShops(trials);
