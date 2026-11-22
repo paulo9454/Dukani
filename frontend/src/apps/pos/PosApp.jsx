@@ -638,7 +638,7 @@ useEffect(() => {
           minHeight: 44,
         }}
       >
-        {outOfStock ? "Sold out" : isUB || isVR ? "Choose option" : "+ Add"}
+        {outOfStock ? "Sold out" : isUB ? "Choose size" : isVR ? `Choose ${String(p.variant_label || "option").toLowerCase()}` : "+ Add"}
       </button>
     </div>
   );
@@ -1151,7 +1151,7 @@ function ProductPickerModal({ product, onClose, onPick }) {
           }}
         >
           <h3 style={{ margin: 0, color: "#0f172a" }}>
-            Choose {isUB ? "size" : "option"}
+            Choose {isUB ? "size" : String(product.variant_label || "option").toLowerCase()}
           </h3>
           <button
             onClick={onClose}
