@@ -4,6 +4,7 @@ import API from "./api/client";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import ChangePassword from "./pages/ChangePassword";
 import Register from "./pages/Register";
 import VerifyEmail from "./pages/VerifyEmail";
 import PublicShopPage from "./pages/PublicShopPage";
@@ -218,6 +219,22 @@ function App() {
           window.history.pushState({}, "", "/login");
         }}
         onNeedsVerification={(email) => setPendingVerification({ email })}
+      />
+    );
+  }
+
+  // Shopkeepers issued a temporary password must choose their own password
+  // before accessing POS or shop operations.
+  if (token && user?.role === "shopkeeper" && user?.must_change_password) {
+    return (
+      <ChangePassword
+        onChanged={() => {
+          const updatedUser = { ...user, must_change_password: false };
+          localStorage.setItem("user", JSON.stringify(updatedUser));
+          setUser(updatedUser);
+          window.location.replace("/shopkeeper");
+        }}
+        onLogout={handleLogout}
       />
     );
   }
