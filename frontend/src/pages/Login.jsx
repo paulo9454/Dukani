@@ -9,7 +9,7 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      setError("Please enter email and password");
+      setError("Please enter your phone number or email and password");
       return;
     }
     try {
@@ -64,8 +64,8 @@ function Login({ onSwitch, onLogin, onNeedsVerification }) {
         <h3 style={{ marginTop: 24, marginBottom: 8 }}>Shop Owner sign in</h3>
 
         <input
-          data-testid="login-email"
-          placeholder="Email"
+          data-testid="login-identifier"
+          placeholder="Phone number or email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           style={inputStyle}
