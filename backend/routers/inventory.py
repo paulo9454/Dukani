@@ -226,81 +226,152 @@ def restock_product(
 ):
     db = get_db()
 
-    shop_id = payload.get("shop_id")
     product_id = payload.get("product_id")
-    qty = float(payload.get("qty", 0))
-    total_cost = float(payload.get("total_cost", 0))
-    buying_price = float(payload.get("buying_price", 0))
-
     if not product_id:
         raise HTTPException(400, "product_id required")
 
-    if qty <= 0:
-        raise HTTPException(400, "Invalid quantity")
-
-    product_query = {"_id": product_id}
-    if shop_id:
-        product_query["shop_id"] = shop_id
-    product = db.products.find_one(product_query)
-
+    product = db.products.find_one({"_id": product_id})
     if not product:
         raise HTTPException(404, "Product not found")
 
-    # 🔐 Tenant guard — restock only allowed for shops the caller owns or
-    # is assigned to. Use the product's actual shop, not what the client
-    # claimed in the body.
+    # Always authorize against the product's actual shop. A client-supplied
+    # shop_id is only an additional consistency check, never the authority.
+    supplied_shop_id = payload.get("shop_id")
+    if supplied_shop_id and supplied_shop_id != product.get("shop_id"):
+        raise HTTPException(404, "Product not found")
     assert_shop_access(user, product["shop_id"])
 
-    old_stock = float(product.get("stock", 0))
-    old_buy = float(product.get("buying_price", 0))
+    ptype = product.get("product_type") or "standard"
+    total_cost = payload.get("total_cost")
+    try:
+        total_cost = float(total_cost)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "A valid total_cost is required")
+    if not (total_cost > 0):
+        raise HTTPException(400, "Total cost must be greater than zero")
 
-    new_stock = old_stock + qty
-
-    # =========================
-    # 💰 WEIGHTED BUYING PRICE
-    # =========================
-    if new_stock > 0:
-        new_buying_price = (
-            (old_stock * old_buy) + (qty * buying_price)
-        ) / new_stock
-    else:
-        new_buying_price = buying_price
-
-    # =========================
-    # UPDATE PRODUCT
-    # =========================
-    db.products.update_one(
-        {"_id": product_id},
-        {
-            "$set": {
-                "stock": new_stock,
-                "buying_price": round(new_buying_price, 2),
-                "updated_at": now(),
-            }
-        }
-    )
-
-    # =========================
-    # 💸 CAPITAL LOG
-    # =========================
-    db.inventory_movements.insert_one({
+    movement = {
         "_id": str(uuid.uuid4()),
         "shop_id": product.get("shop_id"),
         "product_id": product_id,
         "type": "RESTOCK",
-        "qty": qty,
-        "total_cost": total_cost,
-        "buying_price": buying_price,
+        "total_cost": round(total_cost, 2),
         "created_at": now(),
-    })
+        "product_type": ptype,
+    }
 
+    if ptype == "standard":
+        try:
+            qty = float(payload.get("qty"))
+            buying_price = float(payload.get("buying_price"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Valid qty and buying_price are required")
+        if qty <= 0 or buying_price <= 0:
+            raise HTTPException(400, "Quantity and buying price must be greater than zero")
+
+        old_stock = float(product.get("stock", 0) or 0)
+        old_buy = float(product.get("buying_price", 0) or 0)
+        new_stock = old_stock + qty
+        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+        db.products.update_one(
+            {"_id": product_id, "shop_id": product["shop_id"]},
+            {"$set": {
+                "stock": new_stock,
+                "buying_price": round(new_buy, 2),
+                "updated_at": now(),
+            }},
+        )
+        movement.update({"qty": qty, "buying_price": round(buying_price, 2)})
+        response = {
+            "new_stock": new_stock,
+            "new_buying_price": round(new_buy, 2),
+        }
+
+    elif ptype == "variant":
+        variant_name = str(payload.get("variant_name") or "").strip()
+        try:
+            qty = float(payload.get("qty"))
+            buying_price = float(payload.get("buying_price"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Select a variant and enter valid quantity and buying price")
+        if not variant_name:
+            raise HTTPException(400, "variant_name required")
+        if qty <= 0 or buying_price <= 0:
+            raise HTTPException(400, "Quantity and buying price must be greater than zero")
+
+        variants = product.get("variants") or []
+        variant = next((v for v in variants if v.get("name") == variant_name), None)
+        if variant is None:
+            raise HTTPException(404, "Variant not found")
+        old_stock = float(variant.get("stock", 0) or 0)
+        old_buy = float(variant.get("buying_price", product.get("buying_price", 0)) or 0)
+        new_stock = old_stock + qty
+        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+        updated = db.products.update_one(
+            {"_id": product_id, "shop_id": product["shop_id"],
+             "variants": {"$elemMatch": {"name": variant_name}}},
+            {"$inc": {"variants.$.stock": qty},
+             "$set": {"variants.$.buying_price": round(new_buy, 2), "updated_at": now()}},
+        )
+        if updated.modified_count == 0:
+            raise HTTPException(409, "Variant stock was not updated; refresh and try again")
+        movement.update({
+            "qty": qty, "buying_price": round(buying_price, 2),
+            "variant_name": variant_name,
+        })
+        response = {
+            "variant_name": variant_name,
+            "new_stock": new_stock,
+            "new_buying_price": round(new_buy, 2),
+        }
+
+    elif ptype == "unit_based":
+        try:
+            base_quantity = float(payload.get("base_quantity"))
+            buying_price = float(payload.get("buying_price"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, "Valid base_quantity and buying_price are required")
+        if base_quantity <= 0 or buying_price <= 0:
+            raise HTTPException(400, "Quantity and buying price must be greater than zero")
+        if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
+            raise HTTPException(400, "Product has an invalid base unit")
+
+        # Checkout values unit-based buying_price per kg/litre. Stock itself
+        # is stored in grams/ml, so convert only for the weighted-cost math.
+        old_base = float(product.get("base_stock_quantity", 0) or 0)
+        old_buy = float(product.get("buying_price", 0) or 0)
+        added_standard_units = base_quantity / 1000.0
+        old_standard_units = old_base / 1000.0
+        total_standard_units = old_standard_units + added_standard_units
+        new_buy = (
+            (old_standard_units * old_buy) + (added_standard_units * buying_price)
+        ) / total_standard_units
+        db.products.update_one(
+            {"_id": product_id, "shop_id": product["shop_id"]},
+            {"$inc": {"base_stock_quantity": base_quantity},
+             "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+        )
+        movement.update({
+            "qty": base_quantity,
+            "base_unit": product.get("base_unit"),
+            "buying_price": round(buying_price, 2),
+        })
+        response = {
+            "new_base_stock_quantity": old_base + base_quantity,
+            "new_buying_price": round(new_buy, 2),
+            "base_unit": product.get("base_unit"),
+        }
+
+    else:
+        raise HTTPException(400, "Unsupported product type")
+
+    db.inventory_movements.insert_one(movement)
     return {
         "message": "Restock successful",
         "product_id": product_id,
-        "new_stock": new_stock,
-        "new_buying_price": round(new_buying_price, 2),
+        **response,
     }
-    
+
     # =========================
 # 📊 PROFIT + CAPITAL DASHBOARD
 # =========================
