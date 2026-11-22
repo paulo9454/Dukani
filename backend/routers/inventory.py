@@ -330,13 +330,17 @@ def restock_product(
             new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
             variant_match = {"name": variant_name}
             variant_match.update(snapshot_condition(variant, "stock"))
+            query = {"_id": product_id, "shop_id": product["shop_id"]}
             if "buying_price" in variant:
                 variant_match.update(snapshot_condition(variant, "buying_price"))
             else:
                 variant_match["buying_price"] = {"$exists": False}
+                # When this variant inherits the product-level cost, include
+                # that fallback value in the compare-and-set snapshot too.
+                query.update(snapshot_condition(product, "buying_price"))
+            query["variants"] = {"$elemMatch": variant_match}
             updated = db.products.update_one(
-                {"_id": product_id, "shop_id": product["shop_id"],
-                 "variants": {"$elemMatch": variant_match}},
+                query,
                 {"$inc": {"variants.$.stock": qty},
                  "$set": {"variants.$.buying_price": round(new_buy, 2), "updated_at": now()}},
             )
