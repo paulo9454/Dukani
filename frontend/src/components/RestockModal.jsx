@@ -1,50 +1,57 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import API from "../api/client";
+import { formatBaseStock } from "../utils/productTypes";
 
 function RestockModal({ open, onClose, product, onSuccess }) {
-  const [form, setForm] = useState({
-    qty: 0,
-    total_cost: 0,
-    unit_type: product?.unit_type || "piece",
-    conversion_factor: product?.conversion_factor || 1,
-  });
-
+  const [qty, setQty] = useState("");
+  const [totalCost, setTotalCost] = useState("");
+  const [variantName, setVariantName] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const type = product?.product_type || "standard";
+  const variants = product?.variants || [];
+  const selectedVariant = variants.find((v) => v.name === variantName);
+  const factor = type === "unit_based" && ["kg", "litre", "l"].includes(product?.base_unit) ? 1000 : 1;
+  const enteredQty = Number(qty);
+  const cost = Number(totalCost);
+  const valid = Number.isFinite(enteredQty) && enteredQty > 0 &&
+    Number.isFinite(cost) && cost > 0 &&
+    (type !== "variant" || Boolean(selectedVariant));
+  const effectiveQty = enteredQty * factor;
+  const buyingPrice = type === "unit_based"
+    ? cost / (effectiveQty / 1000)
+    : cost / effectiveQty;
+
+  useEffect(() => {
+    setQty("");
+    setTotalCost("");
+    setVariantName(product?.variants?.[0]?.name || "");
+  }, [product?._id, open]);
+
+  const stockLabel = useMemo(() => {
+    if (!product) return "";
+    if (type === "unit_based") return formatBaseStock(product.base_stock_quantity, product.base_unit);
+    if (type === "variant") return variants.map((v) => `${v.name}: ${v.stock ?? 0}`).join(" · ");
+    return String(product.stock ?? 0);
+  }, [product, type, variants]);
 
   if (!open || !product) return null;
 
-  const update = (k, v) => {
-    setForm((prev) => ({ ...prev, [k]: v }));
-  };
-
-  // =========================
-  // 🧠 CALCULATIONS
-  // =========================
-  const totalUnits =
-    form.qty * (form.conversion_factor || 1);
-
-  const costPerUnit =
-    totalUnits > 0 ? form.total_cost / totalUnits : 0;
-
-  // =========================
-  // SUBMIT
-  // =========================
   const submit = async () => {
-    if (form.qty <= 0) {
-      return alert("Enter valid quantity");
-    }
-
+    if (!valid) return alert("Enter a quantity and total cost greater than zero.");
+    const payload = {
+      product_id: product._id,
+      total_cost: cost,
+      ...(type === "variant"
+        ? { variant_name: variantName, qty: enteredQty, buying_price: buyingPrice }
+        : type === "unit_based"
+          ? { base_quantity: effectiveQty, buying_price: buyingPrice }
+          : { qty: enteredQty, buying_price: buyingPrice }),
+    };
     try {
       setLoading(true);
-
-      await API.post("/api/inventory/restock", {
-        product_id: product._id,
-        qty: totalUnits,
-        buying_price: costPerUnit,
-        total_cost: form.total_cost,
-      });
-
-      onSuccess?.();
+      await API.post("/api/inventory/restock", payload);
+      await onSuccess?.();
       onClose();
     } catch (err) {
       alert(err?.response?.data?.detail || "Restock failed");
@@ -56,72 +63,43 @@ function RestockModal({ open, onClose, product, onSuccess }) {
   return (
     <div style={styles.backdrop}>
       <div style={styles.modal}>
-        <h3>📦 Restock: {product.name}</h3>
+        <h3>Restock: {product.name}</h3>
+        <p style={styles.muted}>Current stock: {stockLabel}</p>
 
-        {/* =========================
-            INPUTS
-        ========================= */}
-        <div style={styles.grid}>
-          <input
-            type="number"
-            placeholder="Quantity Bought"
-            value={form.qty}
-            onChange={(e) =>
-              update("qty", Number(e.target.value || 0))
-            }
-          />
+        {type === "variant" && (
+          <label style={styles.field}>
+            Variant
+            <select value={variantName} onChange={(e) => setVariantName(e.target.value)}>
+              {variants.map((v) => (
+                <option key={v.name} value={v.name}>{v.name} — {v.stock ?? 0} in stock</option>
+              ))}
+            </select>
+          </label>
+        )}
 
-          <input
-            type="number"
-            placeholder="Total Cost (KES)"
-            value={form.total_cost}
-            onChange={(e) =>
-              update("total_cost", Number(e.target.value || 0))
-            }
-          />
+        <label style={styles.field}>
+          {type === "unit_based" ? `Quantity added (${product.base_unit})` : "Quantity bought"}
+          <input type="number" min="0" step="any" value={qty}
+            onChange={(e) => setQty(e.target.value)} placeholder="Enter quantity" />
+        </label>
 
-          <select
-            value={form.unit_type}
-            onChange={(e) =>
-              update("unit_type", e.target.value)
-            }
-          >
-            <option value="piece">Piece</option>
-            <option value="kg">Kg</option>
-            <option value="dozen">Dozen</option>
-            <option value="bundle">Bundle</option>
-            <option value="pack">Pack</option>
-          </select>
+        <label style={styles.field}>
+          Total purchase cost (KES)
+          <input type="number" min="0" step="any" value={totalCost}
+            onChange={(e) => setTotalCost(e.target.value)} placeholder="Enter total cost" />
+        </label>
 
-          <input
-            type="number"
-            placeholder="Units per pack (e.g. 12 for dozen)"
-            value={form.conversion_factor}
-            onChange={(e) =>
-              update(
-                "conversion_factor",
-                Number(e.target.value || 1)
-              )
-            }
-          />
-        </div>
+        {valid && (
+          <div style={styles.calculation}>
+            <div>Buying cost per {type === "unit_based" ? "kg / litre" : "unit"}: <b>KES {buyingPrice.toFixed(2)}</b></div>
+            {type === "unit_based" && <small>Stock addition: {effectiveQty.toLocaleString()} {product.base_unit === "kg" ? "g" : product.base_unit === "litre" || product.base_unit === "l" ? "ml" : product.base_unit}</small>}
+          </div>
+        )}
 
-        {/* =========================
-            CALCULATIONS DISPLAY
-        ========================= */}
-        <div style={{ marginTop: 15 }}>
-          <p>Total Units: <b>{totalUnits}</b></p>
-          <p>Cost per Unit: <b>KES {costPerUnit.toFixed(2)}</b></p>
-        </div>
-
-        {/* =========================
-            ACTIONS
-        ========================= */}
         <div style={styles.actions}>
-          <button onClick={onClose}>Cancel</button>
-
-          <button onClick={submit} disabled={loading}>
-            {loading ? "Saving..." : "Save Restock"}
+          <button onClick={onClose} disabled={loading}>Cancel</button>
+          <button onClick={submit} disabled={loading || !valid}>
+            {loading ? "Saving..." : "Save restock"}
           </button>
         </div>
       </div>
@@ -130,30 +108,12 @@ function RestockModal({ open, onClose, product, onSuccess }) {
 }
 
 const styles = {
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(0,0,0,0.5)",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 999,
-  },
-  modal: {
-    width: 420,
-    background: "#fff",
-    padding: 20,
-    borderRadius: 10,
-  },
-  grid: {
-    display: "grid",
-    gap: 10,
-  },
-  actions: {
-    display: "flex",
-    justifyContent: "space-between",
-    marginTop: 20,
-  },
+  backdrop: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 999 },
+  modal: { width: 440, maxWidth: "calc(100vw - 32px)", background: "#fff", padding: 20, borderRadius: 10, color: "#222", maxHeight: "90vh", overflowY: "auto" },
+  muted: { color: "#666", fontSize: 13 },
+  field: { display: "grid", gap: 6, marginTop: 14, fontSize: 14 },
+  calculation: { marginTop: 14, padding: 12, background: "#f5f5f5", borderRadius: 8, display: "grid", gap: 5 },
+  actions: { display: "flex", justifyContent: "space-between", marginTop: 20 },
 };
 
 export default RestockModal;
