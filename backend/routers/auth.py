@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Body
 from backend.db.mongo import get_db
 from backend.schemas.auth import RegisterRequest, LoginRequest, RefreshRequest, ForgotPasswordRequest, ResetPasswordRequest
 from backend.core.security import (
@@ -44,6 +44,7 @@ def _user_response(user: dict) -> dict:
         "subscription_status": user.get("subscription_status", "active"),
         "is_verified": user.get("is_verified", True),
         "is_active": user.get("is_active", True),
+        "must_change_password": bool(user.get("must_change_password", False)),
     }
 
 
@@ -308,6 +309,32 @@ def reset_password(payload: ResetPasswordRequest):
     db.password_reset_tokens.delete_many({"user_id": user_id})
     audit_log("auth_password_reset", actor_id=user_id, status="success")
     return {"message": "Your password has been reset. You can now sign in."}
+
+
+@router.post("/change-password")
+def change_password(payload: dict = Body(...), user=Depends(get_current_user)):
+    """Complete the mandatory password change after an owner-issued temporary password."""
+    if user.get("role") != "shopkeeper" or not user.get("must_change_password"):
+        raise HTTPException(status_code=403, detail="Password change is not required for this account")
+
+    new_password = payload.get("new_password") or ""
+    if len(new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long")
+    if len(new_password) > 72:
+        raise HTTPException(status_code=400, detail="Password must be 72 characters or fewer")
+
+    now = datetime.now(timezone.utc).isoformat()
+    db = get_db()
+    db.users.update_one(
+        {"_id": user["_id"], "role": "shopkeeper", "must_change_password": True},
+        {"$set": {
+            "password_hash": hash_password(new_password),
+            "must_change_password": False,
+            "password_updated_at": now,
+        }},
+    )
+    audit_log("auth_forced_password_change", actor_id=user["_id"], status="success")
+    return {"message": "Password updated successfully. You can now continue."}
 
 
 @router.get("/me")
