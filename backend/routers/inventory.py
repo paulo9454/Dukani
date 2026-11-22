@@ -9,6 +9,7 @@ from backend.core.deps import (
 )
 from datetime import datetime, timezone
 import uuid
+import math
 
 router = APIRouter(prefix="/api/inventory", tags=["Inventory"])
 
@@ -247,8 +248,8 @@ def restock_product(
         total_cost = float(total_cost)
     except (TypeError, ValueError):
         raise HTTPException(400, "A valid total_cost is required")
-    if not (total_cost > 0):
-        raise HTTPException(400, "Total cost must be greater than zero")
+    if not math.isfinite(total_cost) or total_cost <= 0:
+        raise HTTPException(400, "Total cost must be a finite number greater than zero")
 
     # Compare-and-set retries keep the weighted buying price in sync with the
     # exact stock/cost snapshot being updated. This prevents a concurrent sale
@@ -283,8 +284,8 @@ def restock_product(
                 buying_price = float(payload.get("buying_price"))
             except (TypeError, ValueError):
                 raise HTTPException(400, "Valid qty and buying_price are required")
-            if qty <= 0 or buying_price <= 0:
-                raise HTTPException(400, "Quantity and buying price must be greater than zero")
+            if not math.isfinite(qty) or not math.isfinite(buying_price) or qty <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
 
             old_stock_raw = product.get("stock")
             old_buy_raw = product.get("buying_price")
@@ -317,8 +318,8 @@ def restock_product(
                 raise HTTPException(400, "Select a variant and enter valid quantity and buying price")
             if not variant_name:
                 raise HTTPException(400, "variant_name required")
-            if qty <= 0 or buying_price <= 0:
-                raise HTTPException(400, "Quantity and buying price must be greater than zero")
+            if not math.isfinite(qty) or not math.isfinite(buying_price) or qty <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
 
             variants = product.get("variants") or []
             variant = next((v for v in variants if v.get("name") == variant_name), None)
@@ -362,8 +363,8 @@ def restock_product(
                 buying_price = float(payload.get("buying_price"))
             except (TypeError, ValueError):
                 raise HTTPException(400, "Valid base_quantity and buying_price are required")
-            if base_quantity <= 0 or buying_price <= 0:
-                raise HTTPException(400, "Quantity and buying price must be greater than zero")
+            if not math.isfinite(base_quantity) or not math.isfinite(buying_price) or base_quantity <= 0 or buying_price <= 0:
+                raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
             if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
                 raise HTTPException(400, "Product has an invalid base unit")
 
