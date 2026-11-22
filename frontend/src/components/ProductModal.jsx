@@ -33,6 +33,7 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
     selling_units: [               // [{ label, quantity, price }]
       { label: "", quantity: 0, price: 0 },
     ],
+    variant_label: "Type / flavour / size",
     variants: [                    // [{ name, stock, price }]
       { name: "", stock: 0, buying_price: 0, price: 0 },
     ],
@@ -78,25 +79,30 @@ function ProductModal({ open, onClose, shopId, onSuccess, product }) {
         variants: (product.variants && product.variants.length)
           ? product.variants.map((v) => ({ name: v.name || "", stock: Number(v.stock || 0), buying_price: Number(v.buying_price || product.buying_price || 0), price: Number(v.price || 0) }))
           : [{ name: "", stock: 0, buying_price: 0, price: 0 }],
+        variant_label: product.variant_label || "Type / flavour / size",
       });
     } else {
       setForm({
         name: "",
         category: "",
         category_id: "",
-
         selling_price: 0,
         wholesale_price: 0,
         buying_unit: "piece",
         buying_quantity: 1,
         buying_cost: 0,
         items_per_packet: 1,
-
         cost_per_unit: 0,
         stock_quantity: 0,
-
         min_stock_level: 5,
+        product_type: "standard",
+        base_unit: "g",
+        base_stock_quantity: 0,
+        selling_units: [{ label: "", quantity: 0, price: 0 }],
+        variant_label: "Type / flavour / size",
+        variants: [{ name: "", stock: 0, buying_price: 0, price: 0 }],
       });
+      setImage(null);
     }
   }, [product, open]);
   
@@ -186,6 +192,7 @@ formData.append("unit_type", "piece");
 formData.append("conversion_factor", 1);
 
 formData.append("product_type", form.product_type || "standard");
+formData.append("variant_label", form.variant_label || "Type / flavour / size");
 if (form.product_type === "unit_based") {
   formData.append("base_unit", form.base_unit || "g");
   formData.append("base_stock_quantity", Number(form.base_stock_quantity || 0));
@@ -203,19 +210,30 @@ if (form.product_type === "unit_based") {
   );
 }
 if (form.product_type === "variant") {
-  formData.append(
-    "variants",
-    JSON.stringify(
-      (form.variants || [])
-        .filter((v) => v.name)
-        .map((v) => ({
-          name: v.name,
-          stock: Number(v.stock || 0),
-            buying_price: Number(v.buying_price || form.cost_per_unit || 0),
-          price: Number(v.price || 0),
-        })),
-    ),
-  );
+  const cleanVariants = (form.variants || [])
+    .filter((v) => String(v.name || "").trim())
+    .map((v) => ({
+      name: String(v.name).trim(),
+      stock: Number(v.stock || 0),
+      buying_price: Number(v.buying_price || 0),
+      price: Number(v.price || 0),
+    }));
+  if (!cleanVariants.length) {
+    alert("Add at least one variant, such as Coke, Medium or 500ml.");
+    setLoading(false);
+    return;
+  }
+  if (cleanVariants.some((v) => v.stock < 0 || v.buying_price < 0 || v.price <= 0)) {
+    alert("Each variant needs a non-negative stock and buying price, and a selling price greater than zero.");
+    setLoading(false);
+    return;
+  }
+  if (new Set(cleanVariants.map((v) => v.name.toLowerCase())).size !== cleanVariants.length) {
+    alert("Variant names must be unique. Remove duplicate names.");
+    setLoading(false);
+    return;
+  }
+  formData.append("variants", JSON.stringify(cleanVariants));
 }
 
 // ✅ IMAGE
@@ -508,14 +526,33 @@ if (image) {
 {/* ── VARIANT FIELDS ── */}
 {form.product_type === "variant" && (
   <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed #cbd5e1", paddingTop: 12 }}>
-    <h4 style={{ margin: "0 0 8px" }}>👕 Variants (sizes / types)</h4>
+    <h4 style={{ margin: "0 0 6px" }}>Variants — add each option sold separately</h4>
+    <p style={{ fontSize: 13, color: "#475569", margin: "0 0 10px" }}>
+      Use this for flavours (Coke, Orange), sizes (Small, Medium), packaging (500ml, 1 litre), colours or other options.
+      Each option has its own stock and prices. The product photo is shared by all variants.
+    </p>
+    <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 8 }}>
+      What makes these options different?
+      <select
+        value={form.variant_label || "Type / flavour / size"}
+        onChange={(e) => update("variant_label", e.target.value)}
+        style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
+      >
+        <option>Type / flavour / size</option>
+        <option>Flavour</option>
+        <option>Size</option>
+        <option>Packaging</option>
+        <option>Colour</option>
+        <option>Other</option>
+      </select>
+    </label>
     {(form.variants || []).map((v, i) => (
       <div
         key={i}
         style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 32px", gap: 6, marginBottom: 6 }}
       >
         <input
-          placeholder="Variant (e.g. Medium)"
+          placeholder={form.variant_label === "Flavour" ? "e.g. Coke" : form.variant_label === "Size" ? "e.g. Medium / Large" : form.variant_label === "Packaging" ? "e.g. 500ml / 1 litre" : form.variant_label === "Colour" ? "e.g. Red / Blue" : "e.g. Coke, Medium, 500ml"}
           value={v.name}
           onChange={(e) => {
             const next = [...form.variants];
