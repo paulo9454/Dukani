@@ -274,3 +274,102 @@ def test_existing_standard_products_still_work(client, owner_token, shop_id):
     db = get_db()
     p = db.products.find_one({"_id": pid})
     assert p["stock"] == 3
+
+
+# ─────────────────────────────────────────────────────────────
+# RESTOCK — product-type aware stock updates
+# ─────────────────────────────────────────────────────────────
+
+def test_standard_restock_preserves_legacy_contract(client, owner_token, shop_id):
+    pid = _create(
+        client, owner_token, shop_id=shop_id, name="Bread Restock",
+        price=60, buying_price=20, stock=10,
+    ).json()["_id"]
+    res = client.post(
+        "/api/inventory/restock",
+        headers=_auth(owner_token),
+        json={"product_id": pid, "qty": 5, "buying_price": 30, "total_cost": 150},
+    )
+    assert res.status_code == 200, res.text
+    p = get_db().products.find_one({"_id": pid})
+    assert p["stock"] == 15
+    assert p["buying_price"] == 23.33
+    assert p["price"] == 60
+
+
+def test_variant_restock_updates_only_selected_variant(client, owner_token, shop_id):
+    variants = [
+        {"name": "Small", "stock": 5, "buying_price": 100, "price": 200},
+        {"name": "Large", "stock": 8, "buying_price": 150, "price": 300},
+    ]
+    pid = _create(
+        client, owner_token, shop_id=shop_id, name="Variant Restock",
+        product_type="variant", variants=json.dumps(variants),
+    ).json()["_id"]
+    db = get_db()
+    db.products.update_one(
+        {"_id": pid}, {"$set": {"variants.0.reserved": 2, "variants.1.reserved": 1}}
+    )
+    res = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": pid, "variant_name": "Large", "qty": 4,
+              "buying_price": 200, "total_cost": 800},
+    )
+    assert res.status_code == 200, res.text
+    saved = db.products.find_one({"_id": pid})
+    by_name = {v["name"]: v for v in saved["variants"]}
+    assert by_name["Small"]["stock"] == 5
+    assert by_name["Small"]["reserved"] == 2
+    assert by_name["Large"]["stock"] == 12
+    assert by_name["Large"]["reserved"] == 1
+    assert by_name["Large"]["price"] == 300
+    assert by_name["Large"]["buying_price"] == 166.67
+
+
+def test_unit_based_restock_adds_base_stock_and_preserves_selling_units(client, owner_token, shop_id):
+    units = [
+        {"label": "250g", "quantity": 250, "price": 45},
+        {"label": "1kg", "quantity": 1000, "price": 180},
+    ]
+    pid = _create(
+        client, owner_token, shop_id=shop_id, name="Sugar Restock",
+        product_type="unit_based", base_unit="kg", base_stock_quantity=10,
+        buying_price=120, selling_units=json.dumps(units),
+    ).json()["_id"]
+    db = get_db()
+    db.products.update_one({"_id": pid}, {"$set": {"reserved_base": 500}})
+    res = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": pid, "base_quantity": 5000,
+              "buying_price": 150, "total_cost": 750},
+    )
+    assert res.status_code == 200, res.text
+    saved = db.products.find_one({"_id": pid})
+    assert saved["base_stock_quantity"] == 15000
+    assert saved["reserved_base"] == 500
+    assert saved["buying_price"] == 130
+    assert saved["selling_units"] == units
+
+
+def test_restock_rejects_invalid_quantity_and_unknown_variant(client, owner_token, shop_id):
+    standard_id = _create(
+        client, owner_token, shop_id=shop_id, name="Invalid Restock",
+        price=10, stock=3,
+    ).json()["_id"]
+    bad_qty = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": standard_id, "qty": 0, "buying_price": 5, "total_cost": 5},
+    )
+    assert bad_qty.status_code == 400
+
+    variant_id = _create(
+        client, owner_token, shop_id=shop_id, name="Unknown Variant Restock",
+        product_type="variant",
+        variants=json.dumps([{"name": "Small", "stock": 2, "price": 10}]),
+    ).json()["_id"]
+    missing_variant = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": variant_id, "variant_name": "XL", "qty": 1,
+              "buying_price": 5, "total_cost": 5},
+    )
+    assert missing_variant.status_code == 404
