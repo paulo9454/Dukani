@@ -4,6 +4,7 @@ from backend.db.mongo import get_db
 from backend.services.subscription_service import get_subscription
 import os
 import uuid
+import secrets
 from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/api/owner", tags=["owner"])
@@ -367,6 +368,63 @@ def create_shopkeeper(payload: dict = Body(...), user=Depends(require_roles("own
             "phone": phone,
             "full_name": full_name,
             "role": "shopkeeper",
+        },
+    }
+
+
+@router.post("/shopkeepers/{shopkeeper_id}/reset-password")
+def reset_shopkeeper_password(
+    shopkeeper_id: str,
+    user=Depends(require_roles("owner", "admin", "partner")),
+):
+    """Generate a one-time temporary password for a shopkeeper in the owner's scope."""
+    from backend.core.security import hash_password
+
+    db = get_db()
+    staff = db.users.find_one({"_id": shopkeeper_id, "role": "shopkeeper"})
+    if not staff:
+        raise HTTPException(status_code=404, detail="Shopkeeper not found")
+
+    if user["role"] != "admin":
+        # Owners can reset shopkeepers they created or that are assigned to
+        # one of their own shops. Partners follow the same ownership boundary.
+        owned_shop_ids = [
+            shop["_id"]
+            for shop in db.shops.find({"owner_id": user["_id"]}, {"_id": 1})
+        ]
+        created_by_owner = staff.get("created_by_owner_id") == user["_id"]
+        assigned_to_owned_shop = bool(owned_shop_ids) and bool(
+            db.assignments.find_one({
+                "shopkeeper_id": shopkeeper_id,
+                "shop_id": {"$in": owned_shop_ids},
+            })
+        )
+        if not (created_by_owner or assigned_to_owned_shop):
+            raise HTTPException(status_code=403, detail="Not allowed to reset this shopkeeper")
+
+    # Return the temporary password once; only its hash is persisted.
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    temporary_password = "".join(secrets.choice(alphabet) for _ in range(14))
+    now = datetime.utcnow().isoformat()
+    db.users.update_one(
+        {"_id": shopkeeper_id, "role": "shopkeeper"},
+        {"$set": {
+            "password_hash": hash_password(temporary_password),
+            "must_change_password": True,
+            "password_updated_at": now,
+        }},
+    )
+    db.refresh_tokens.update_many(
+        {"user_id": shopkeeper_id, "revoked": False},
+        {"$set": {"revoked": True, "revoked_at": now}},
+    )
+    return {
+        "message": "Temporary password generated. Share it privately with the shopkeeper.",
+        "temporary_password": temporary_password,
+        "shopkeeper": {
+            "_id": shopkeeper_id,
+            "full_name": staff.get("full_name") or staff.get("name") or "",
+            "phone": staff.get("phone") or "",
         },
     }
 
