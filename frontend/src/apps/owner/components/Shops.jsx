@@ -46,7 +46,6 @@ function Shops({ search = "" }) {
   // =========================
   const [newShop, setNewShop] = useState({
     name: "",
-    subscription_plan: "pos", // default = 14-day free POS
   });
 
   // =========================
@@ -109,7 +108,6 @@ function Shops({ search = "" }) {
 
       await API.post("/api/owner/shops", {
         name: newShop.name.trim(),
-        subscription_plan: newShop.subscription_plan,
         latitude: location.latitude,
         longitude: location.longitude,
         address: "N/A",
@@ -119,7 +117,6 @@ function Shops({ search = "" }) {
 
       setNewShop({
         name: "",
-        subscription_plan: "pos",
       });
 
       loadShops();
@@ -199,23 +196,19 @@ function Shops({ search = "" }) {
           style={{ display: "block", marginBottom: 10, padding: 8 }}
         />
 
-        {/* =========================
-            PLAN DROPDOWN (FIXED)
-        ========================= */}
-        <select
-          value={newShop.subscription_plan}
-          onChange={(e) =>
-            setNewShop({ ...newShop, subscription_plan: e.target.value })
-          }
-          style={{ display: "block", marginBottom: 10, padding: 8 }}
+        <div
+          data-testid="shop-trial-included"
+          style={{
+            marginBottom: 10,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "#dcfce7",
+            color: "#166534",
+            fontWeight: 600,
+          }}
         >
-          <option value="pos">POS (14 days free)</option>
-          <option value="pos_online">POS + Online</option>
-        </select>
-
-        <p style={{ marginBottom: 10, color: "green" }}>
-          🎁 14-day FREE POS trial included
-        </p>
+          🎁 30-day FREE trial included — POS + Online Sales enabled
+        </div>
 
         <button onClick={createShop} disabled={loading}>
           ➕ Create Shop
