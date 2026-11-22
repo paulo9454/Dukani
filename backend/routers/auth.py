@@ -37,6 +37,7 @@ def _user_response(user: dict) -> dict:
     return {
         "id": user["_id"],
         "email": user.get("email"),
+        "phone": user.get("phone"),
         "name": user.get("full_name"),
         "role": user.get("role"),
         "assigned_shop_ids": assigned,
@@ -191,10 +192,22 @@ def resend_verification(payload: dict):
 @router.post("/login")
 def login(payload: LoginRequest):
     db = get_db()
-    user = db.users.find_one({"email": payload.email.lower()})
+    identifier = payload.email.strip()
+    normalized_phone_digits = "".join(ch for ch in identifier if ch.isdigit())
+    if normalized_phone_digits.startswith("0") and len(normalized_phone_digits) == 10:
+        normalized_phone = "+254" + normalized_phone_digits[1:]
+    elif normalized_phone_digits.startswith("254") and len(normalized_phone_digits) == 12:
+        normalized_phone = "+" + normalized_phone_digits
+    elif identifier.startswith("+") and 10 <= len(normalized_phone_digits) <= 15:
+        normalized_phone = "+" + normalized_phone_digits
+    else:
+        normalized_phone = None
+
+    user = db.users.find_one({"email": identifier.lower()})
+    if not user and normalized_phone:
+        user = db.users.find_one({"phone": normalized_phone})
     if not user or not verify_password(payload.password, user.get("password_hash")):
-        audit_log("auth_login", status="failed",
-                  metadata={"email": payload.email.lower()})
+        audit_log("auth_login", status="failed", metadata={"login_identifier": identifier})
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     if user.get("is_active") is False:
