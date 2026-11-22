@@ -11,7 +11,7 @@ function AssignShopkeepers() {
 
   const [newShopkeeper, setNewShopkeeper] = useState({
     full_name: "",
-    email: "",
+    phone: "",
     password: "",
   });
 
@@ -104,9 +104,9 @@ function AssignShopkeepers() {
   };
 
   const createShopkeeper = async () => {
-    const { full_name, email, password } = newShopkeeper;
-    if (!full_name.trim() || !email.trim() || !password) {
-      alert("Fill all fields (name, email, password)");
+    const { full_name, phone, password } = newShopkeeper;
+    if (!full_name.trim() || !phone.trim() || !password) {
+      alert("Fill all fields (name, phone number, password)");
       return;
     }
     if (password.length < 8) {
@@ -117,11 +117,11 @@ function AssignShopkeepers() {
       setLoading(true);
       await API.post("/api/owner/shopkeepers", {
         full_name: full_name.trim(),
-        email: email.trim().toLowerCase(),
+        phone: phone.trim(),
         password,
       });
       await loadShopkeepers();
-      setNewShopkeeper({ full_name: "", email: "", password: "" });
+      setNewShopkeeper({ full_name: "", phone: "", password: "" });
       showToast("✅ Shopkeeper created — now select a shop and click Assign");
     } catch (err) {
       alert(err?.response?.data?.detail || "Failed to create shopkeeper");
@@ -131,7 +131,7 @@ function AssignShopkeepers() {
   };
 
   const filteredUsers = users.filter((u) =>
-    `${u.full_name || u.name || ""} ${u.email || ""}`
+    `${u.full_name || u.name || ""} ${u.phone || ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -198,12 +198,13 @@ function AssignShopkeepers() {
                 style={inputStyle}
               />
               <input
-                data-testid="sk-create-email"
-                type="email"
-                placeholder="Email"
-                value={newShopkeeper.email}
+                data-testid="sk-create-phone"
+                type="tel"
+                inputMode="tel"
+                placeholder="Phone number (e.g. 0712345678)"
+                value={newShopkeeper.phone}
                 onChange={(e) =>
-                  setNewShopkeeper({ ...newShopkeeper, email: e.target.value })
+                  setNewShopkeeper({ ...newShopkeeper, phone: e.target.value })
                 }
                 style={inputStyle}
               />
@@ -267,7 +268,7 @@ function AssignShopkeepers() {
       {/* ========== STEP 3: LIST + ASSIGN ========== */}
       <div style={{ marginBottom: 10 }}>
         <input
-          placeholder="Search shopkeepers by name or email..."
+          placeholder="Search shopkeepers by name or phone..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={inputStyle}
@@ -377,7 +378,7 @@ function AssignShopkeepers() {
               }}
             >
               👤 <b>{a.shopkeeper_name || "—"}</b>{" "}
-              <span style={{ color: "#555" }}>({a.shopkeeper_email || "—"})</span>
+              <span style={{ color: "#555" }}>({a.shopkeeper_phone || a.shopkeeper_email || "—"})</span>
             </div>
           ))
         )}
