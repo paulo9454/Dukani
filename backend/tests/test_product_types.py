@@ -335,6 +335,44 @@ def test_variant_restock_updates_only_selected_variant(client, owner_token, shop
     assert movement["total_cost"] == 800
     assert movement["buying_price"] == 200
 
+@pytest.mark.parametrize("variant_buying_price", ["missing", None])
+def test_variant_restock_uses_parent_buying_price_when_variant_cost_is_missing_or_null(
+    client, owner_token, shop_id, variant_buying_price,
+):
+    variant = {"name": "Large", "stock": 10, "price": 300}
+
+    if variant_buying_price is None:
+        variant["buying_price"] = None
+
+    pid = _create(
+        client,
+        owner_token,
+        shop_id=shop_id,
+        name="Inherited Variant Cost",
+        buying_price=100,
+        product_type="variant",
+        variants=json.dumps([variant]),
+    ).json()["_id"]
+
+    res = client.post(
+        "/api/inventory/restock",
+        headers=_auth(owner_token),
+        json={
+            "product_id": pid,
+            "variant_name": "Large",
+            "qty": 2,
+            "total_cost": 400,
+        },
+    )
+
+    assert res.status_code == 200, res.text
+
+    saved = get_db().products.find_one({"_id": pid})
+    large = saved["variants"][0]
+
+    assert large["stock"] == 12
+    assert large["buying_price"] == 116.67
+    assert large["price"] == 300
 
 def test_unit_based_restock_adds_base_stock_and_preserves_selling_units(client, owner_token, shop_id):
     units = [

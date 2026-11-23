@@ -351,18 +351,24 @@ def restock_product(
                         if variant is None:
                             raise HTTPException(404, "Variant not found")
                         old_stock = float(variant.get("stock", 0) or 0)
-                        old_buy = float(variant.get("buying_price", product.get("buying_price", 0)) or 0)
+                        variant_buying_price = variant.get("buying_price")
+
+                        if variant_buying_price is None:
+                            old_buy = float(product.get("buying_price") or 0)
+                        else:
+                            old_buy = float(variant_buying_price)
                         new_stock = old_stock + qty
                         new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
                         variant_match = {"name": variant_name}
                         variant_match.update(snapshot_condition(variant, "stock"))
                         query = {"_id": product_id, "shop_id": product["shop_id"]}
-                        if "buying_price" in variant:
+                        if variant.get("buying_price") is not None:
                             variant_match.update(snapshot_condition(variant, "buying_price"))
                         else:
-                            variant_match["buying_price"] = {"$exists": False}
-                            # When this variant inherits the product-level cost, include
-                            # that fallback value in the compare-and-set snapshot too.
+                            # Support both missing and explicitly null variant buying prices.
+                            # The parent buying price is the fallback, so protect it in the
+                            # compare-and-set snapshot as well.
+                            variant_match.update(snapshot_condition(variant, "buying_price"))
                             query.update(snapshot_condition(product, "buying_price"))
                         query["variants"] = {"$elemMatch": variant_match}
                         updated = db.products.update_one(
