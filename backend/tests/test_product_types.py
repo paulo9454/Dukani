@@ -374,6 +374,77 @@ def test_variant_restock_uses_parent_buying_price_when_variant_cost_is_missing_o
     assert large["buying_price"] == 116.67
     assert large["price"] == 300
 
+
+def test_restock_rejects_product_type_change_before_transactional_read(
+    client, owner_token, shop_id, monkeypatch,
+):
+    pid = _create(
+        client,
+        owner_token,
+        shop_id=shop_id,
+        name="Type Change During Restock",
+        price=60,
+        buying_price=20,
+        stock=10,
+    ).json()["_id"]
+
+    db = get_db()
+    original_find_one = db.products.find_one
+    calls = {"count": 0}
+
+    def change_type_before_transactional_read(query, *args, **kwargs):
+        if query.get("_id") == pid:
+            calls["count"] += 1
+
+            if calls["count"] == 2:
+                db.products.update_one(
+                    {"_id": pid},
+                    {
+                        "$set": {
+                            "product_type": "variant",
+                            "variants": [
+                                {
+                                    "name": "Large",
+                                    "stock": 10,
+                                    "price": 100,
+                                }
+                            ],
+                        }
+                    },
+                )
+
+        return original_find_one(query, *args, **kwargs)
+
+    monkeypatch.setattr(
+        db.products,
+        "find_one",
+        change_type_before_transactional_read,
+    )
+
+    res = client.post(
+        "/api/inventory/restock",
+        headers=_auth(owner_token),
+        json={
+            "product_id": pid,
+            "qty": 2,
+            "total_cost": 50,
+        },
+    )
+
+    assert res.status_code == 409, res.text
+
+    saved = original_find_one({"_id": pid})
+
+    assert calls["count"] == 2
+    assert saved["product_type"] == "variant"
+    assert saved["stock"] == 10
+    assert saved["variants"][0]["stock"] == 10
+
+    assert db.inventory_movements.count_documents({
+        "product_id": pid,
+        "type": "RESTOCK",
+    }) == 0
+
 def test_unit_based_restock_adds_base_stock_and_preserves_selling_units(client, owner_token, shop_id):
     units = [
         {"label": "250g", "quantity": 250, "price": 45},

@@ -294,7 +294,12 @@ def restock_product(
                     )
                     if not product:
                         raise HTTPException(404, "Product not found")
-            
+                    current_ptype = product.get("product_type") or "standard"
+                    if current_ptype != ptype:
+                        raise HTTPException(
+                            409,
+                            "Product type changed while restocking; refresh the product and try again",
+                        )
                     if ptype == "standard":
                         try:
                             qty = float(payload.get("qty"))
@@ -315,6 +320,7 @@ def restock_product(
                         new_stock = old_stock + qty
                         new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
                         query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
                         query.update(snapshot_condition(product, "stock"))
                         query.update(snapshot_condition(product, "buying_price"))
                         updated = db.products.update_one(
@@ -362,6 +368,7 @@ def restock_product(
                         variant_match = {"name": variant_name}
                         variant_match.update(snapshot_condition(variant, "stock"))
                         query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
                         if variant.get("buying_price") is not None:
                             variant_match.update(snapshot_condition(variant, "buying_price"))
                         else:
@@ -417,6 +424,7 @@ def restock_product(
                             (old_standard_units * old_buy) + (added_standard_units * buying_price)
                         ) / total_standard_units
                         query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
                         query.update(snapshot_condition(product, "base_stock_quantity"))
                         query.update(snapshot_condition(product, "buying_price"))
                         updated = db.products.update_one(
