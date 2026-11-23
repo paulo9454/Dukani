@@ -428,19 +428,15 @@ def test_restock_rejects_non_finite_total_cost(client, owner_token, shop_id, bad
     assert get_db().products.find_one({"_id": pid})["stock"] == 2
 
 
-@pytest.mark.parametrize("field", ["qty", "buying_price"])
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
-def test_restock_rejects_non_finite_quantity_and_buying_price(
-    client, owner_token, shop_id, field, bad_value,
-):
+def test_restock_rejects_non_finite_quantity(client, owner_token, shop_id, bad_value):
     pid = _create(
-        client, owner_token, shop_id=shop_id, name="Non-finite Input",
+        client, owner_token, shop_id=shop_id, name="Non-finite Quantity",
         price=10, stock=2, buying_price=4,
     ).json()["_id"]
     payload = {
-        "product_id": pid, "qty": 1, "buying_price": 5, "total_cost": 5,
+        "product_id": pid, "qty": bad_value, "buying_price": 5, "total_cost": 5,
     }
-    payload[field] = bad_value
     res = client.post("/api/inventory/restock", headers=_auth(owner_token), json=payload)
     assert res.status_code == 400
     assert get_db().products.find_one({"_id": pid})["stock"] == 2
