@@ -277,12 +277,12 @@ def restock_product(
     # Atlas MongoDB deployments run as replica sets and support multi-document
     # transactions. mongomock does not implement sessions, so tests use the same
     # operations without a transaction; production always requires a transaction.
-    session_context = (
-        nullcontext(None)
-        if os.getenv("TESTING", "0") == "1"
-        else db.client.start_session()
-    )
     try:
+        session_context = (
+            nullcontext(None)
+            if os.getenv("TESTING", "0") == "1"
+            else db.client.start_session()
+        )
         with session_context as session:
             session_kwargs = {"session": session} if session is not None else {}
             transaction_context = session.start_transaction() if session is not None else nullcontext()
