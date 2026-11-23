@@ -445,3 +445,47 @@ def test_restock_rejects_non_finite_quantity_and_buying_price(
     assert res.status_code == 400
     assert get_db().products.find_one({"_id": pid})["stock"] == 2
 
+def test_restock_uses_total_cost_as_authoritative_buying_cost(client, owner_token, shop_id):
+    standard_id = _create(
+        client, owner_token, shop_id=shop_id, name="Authoritative Standard Cost",
+        price=20, stock=0, buying_price=0,
+    ).json()["_id"]
+    standard = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": standard_id, "qty": 4, "total_cost": 100, "buying_price": 1},
+    )
+    assert standard.status_code == 200, standard.text
+    assert get_db().products.find_one({"_id": standard_id})["buying_price"] == 25
+    standard_movement = get_db().inventory_movements.find_one(
+        {"product_id": standard_id, "type": "RESTOCK"}
+    )
+    assert standard_movement["buying_price"] == 25
+    assert standard_movement["total_cost"] == 100
+
+    variant_id = _create(
+        client, owner_token, shop_id=shop_id, name="Authoritative Variant Cost",
+        product_type="variant",
+        variants=json.dumps([{"name": "Large", "stock": 0, "buying_price": 0, "price": 50}]),
+    ).json()["_id"]
+    variant = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": variant_id, "variant_name": "Large", "qty": 2,
+              "total_cost": 90, "buying_price": 999},
+    )
+    assert variant.status_code == 200, variant.text
+    saved_variant = get_db().products.find_one({"_id": variant_id})["variants"][0]
+    assert saved_variant["buying_price"] == 45
+
+    unit_id = _create(
+        client, owner_token, shop_id=shop_id, name="Authoritative Unit Cost",
+        product_type="unit_based", base_unit="kg", base_stock_quantity=0,
+        buying_price=0, selling_units=json.dumps([{"label": "1kg", "quantity": 1000, "price": 200}]),
+    ).json()["_id"]
+    unit = client.post(
+        "/api/inventory/restock", headers=_auth(owner_token),
+        json={"product_id": unit_id, "base_quantity": 3000,
+              "total_cost": 450, "buying_price": 1},
+    )
+    assert unit.status_code == 200, unit.text
+    saved_unit = get_db().products.find_one({"_id": unit_id})
+    assert saved_unit["buying_price"] == 150
