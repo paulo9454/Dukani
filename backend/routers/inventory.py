@@ -9,6 +9,10 @@ from backend.core.deps import (
 )
 from datetime import datetime, timezone
 import uuid
+import math
+import os
+from contextlib import nullcontext
+from pymongo.errors import PyMongoError
 
 router = APIRouter(prefix="/api/inventory", tags=["Inventory"])
 
@@ -226,81 +230,241 @@ def restock_product(
 ):
     db = get_db()
 
-    shop_id = payload.get("shop_id")
     product_id = payload.get("product_id")
-    qty = float(payload.get("qty", 0))
-    total_cost = float(payload.get("total_cost", 0))
-    buying_price = float(payload.get("buying_price", 0))
-
     if not product_id:
         raise HTTPException(400, "product_id required")
 
-    if qty <= 0:
-        raise HTTPException(400, "Invalid quantity")
-
-    product_query = {"_id": product_id}
-    if shop_id:
-        product_query["shop_id"] = shop_id
-    product = db.products.find_one(product_query)
-
+    product = db.products.find_one({"_id": product_id})
     if not product:
         raise HTTPException(404, "Product not found")
 
-    # 🔐 Tenant guard — restock only allowed for shops the caller owns or
-    # is assigned to. Use the product's actual shop, not what the client
-    # claimed in the body.
+    # Always authorize against the product's actual shop. A client-supplied
+    # shop_id is only an additional consistency check, never the authority.
+    supplied_shop_id = payload.get("shop_id")
+    if supplied_shop_id and supplied_shop_id != product.get("shop_id"):
+        raise HTTPException(404, "Product not found")
     assert_shop_access(user, product["shop_id"])
 
-    old_stock = float(product.get("stock", 0))
-    old_buy = float(product.get("buying_price", 0))
+    ptype = product.get("product_type") or "standard"
+    total_cost = payload.get("total_cost")
+    try:
+        total_cost = float(total_cost)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "A valid total_cost is required")
+    if not math.isfinite(total_cost) or total_cost <= 0:
+        raise HTTPException(400, "Total cost must be a finite number greater than zero")
 
-    new_stock = old_stock + qty
-
-    # =========================
-    # 💰 WEIGHTED BUYING PRICE
-    # =========================
-    if new_stock > 0:
-        new_buying_price = (
-            (old_stock * old_buy) + (qty * buying_price)
-        ) / new_stock
-    else:
-        new_buying_price = buying_price
-
-    # =========================
-    # UPDATE PRODUCT
-    # =========================
-    db.products.update_one(
-        {"_id": product_id},
-        {
-            "$set": {
-                "stock": new_stock,
-                "buying_price": round(new_buying_price, 2),
-                "updated_at": now(),
-            }
-        }
-    )
-
-    # =========================
-    # 💸 CAPITAL LOG
-    # =========================
-    db.inventory_movements.insert_one({
+    # Compare-and-set protects the exact stock/cost snapshot. The transaction
+    # makes a concurrent write conflict abort the whole restock rather than
+    # allowing a stale stock/cost update to commit.
+    max_attempts = 1
+    response = None
+    movement = {
         "_id": str(uuid.uuid4()),
         "shop_id": product.get("shop_id"),
         "product_id": product_id,
         "type": "RESTOCK",
-        "qty": qty,
-        "total_cost": total_cost,
-        "buying_price": buying_price,
+        "total_cost": round(total_cost, 2),
         "created_at": now(),
-    })
+        "product_type": ptype,
+    }
 
+    def snapshot_condition(document, field):
+        if field in document:
+            return {field: document[field]}
+        return {field: {"$exists": False}}
+
+    # Atlas MongoDB deployments run as replica sets and support multi-document
+    # transactions. mongomock does not implement sessions, so tests use the same
+    # operations without a transaction; production always requires a transaction.
+    try:
+        session_context = (
+            nullcontext(None)
+            if os.getenv("TESTING", "0") == "1"
+            else db.client.start_session()
+        )
+        with session_context as session:
+            session_kwargs = {"session": session} if session is not None else {}
+            transaction_context = session.start_transaction() if session is not None else nullcontext()
+            with transaction_context:
+                for _ in range(max_attempts):
+                    product = db.products.find_one(
+                        {"_id": product_id, "shop_id": product["shop_id"]},
+                        **session_kwargs,
+                    )
+                    if not product:
+                        raise HTTPException(404, "Product not found")
+                    current_ptype = product.get("product_type") or "standard"
+                    if current_ptype != ptype:
+                        raise HTTPException(
+                            409,
+                            "Product type changed while restocking; refresh the product and try again",
+                        )
+                    if ptype == "standard":
+                        try:
+                            qty = float(payload.get("qty"))
+                        except (TypeError, ValueError):
+                            raise HTTPException(400, "A valid quantity is required")
+                        if not math.isfinite(qty) or qty <= 0:
+                            raise HTTPException(400, "Quantity must be a finite number greater than zero")
+                        # Derive unit cost from the authoritative purchase total.
+                        # Never trust a client-supplied buying_price for accounting.
+                        buying_price = total_cost / qty
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
+            
+                        old_stock_raw = product.get("stock")
+                        old_buy_raw = product.get("buying_price")
+                        old_stock = float(old_stock_raw or 0)
+                        old_buy = float(old_buy_raw or 0)
+                        new_stock = old_stock + qty
+                        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+                        query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
+                        query.update(snapshot_condition(product, "stock"))
+                        query.update(snapshot_condition(product, "buying_price"))
+                        updated = db.products.update_one(
+                            query,
+                            {"$inc": {"stock": qty},
+                             "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+                            **session_kwargs,
+                        )
+                        if updated.modified_count:
+                            movement.update({"qty": qty, "buying_price": round(buying_price, 2)})
+                            response = {
+                                "new_stock": new_stock,
+                                "new_buying_price": round(new_buy, 2),
+                            }
+                            break
+            
+                    elif ptype == "variant":
+                        variant_name = str(payload.get("variant_name") or "").strip()
+                        try:
+                            qty = float(payload.get("qty"))
+                        except (TypeError, ValueError):
+                            raise HTTPException(400, "Select a variant and enter a valid quantity")
+                        if not variant_name:
+                            raise HTTPException(400, "variant_name required")
+                        if not math.isfinite(qty) or qty <= 0:
+                            raise HTTPException(400, "Quantity must be a finite number greater than zero")
+                        # Derive unit cost from the authoritative purchase total.
+                        buying_price = total_cost / qty
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
+            
+                        variants = product.get("variants") or []
+                        variant = next((v for v in variants if v.get("name") == variant_name), None)
+                        if variant is None:
+                            raise HTTPException(404, "Variant not found")
+                        old_stock = float(variant.get("stock", 0) or 0)
+                        variant_buying_price = variant.get("buying_price")
+
+                        if variant_buying_price is None:
+                            old_buy = float(product.get("buying_price") or 0)
+                        else:
+                            old_buy = float(variant_buying_price)
+                        new_stock = old_stock + qty
+                        new_buy = ((old_stock * old_buy) + (qty * buying_price)) / new_stock
+                        variant_match = {"name": variant_name}
+                        variant_match.update(snapshot_condition(variant, "stock"))
+                        query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
+                        if variant.get("buying_price") is not None:
+                            variant_match.update(snapshot_condition(variant, "buying_price"))
+                        else:
+                            # Support both missing and explicitly null variant buying prices.
+                            # The parent buying price is the fallback, so protect it in the
+                            # compare-and-set snapshot as well.
+                            variant_match.update(snapshot_condition(variant, "buying_price"))
+                            query.update(snapshot_condition(product, "buying_price"))
+                        query["variants"] = {"$elemMatch": variant_match}
+                        updated = db.products.update_one(
+                            query,
+                            {"$inc": {"variants.$.stock": qty},
+                             "$set": {"variants.$.buying_price": round(new_buy, 2), "updated_at": now()}},
+                            **session_kwargs,
+                        )
+                        if updated.modified_count:
+                            movement.update({
+                                "qty": qty, "buying_price": round(buying_price, 2),
+                                "variant_name": variant_name,
+                            })
+                            response = {
+                                "variant_name": variant_name,
+                                "new_stock": new_stock,
+                                "new_buying_price": round(new_buy, 2),
+                            }
+                            break
+            
+                    elif ptype == "unit_based":
+                        try:
+                            base_quantity = float(payload.get("base_quantity"))
+                        except (TypeError, ValueError):
+                            raise HTTPException(400, "A valid base_quantity is required")
+                        if not math.isfinite(base_quantity) or base_quantity <= 0:
+                            raise HTTPException(400, "Base quantity must be a finite number greater than zero")
+                        if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
+                            raise HTTPException(400, "Product has an invalid base unit")
+                        # Unit-based buying cost is stored per kg/litre, while stock
+                        # is stored in g/ml. Derive it from total purchase cost.
+                        buying_price = total_cost / (base_quantity / 1000.0)
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
+            
+                        # Checkout values unit-based buying_price per kg/litre. Stock itself
+                        # is stored in grams/ml, so convert only for the weighted-cost math.
+                        old_base_raw = product.get("base_stock_quantity")
+                        old_buy_raw = product.get("buying_price")
+                        old_base = float(old_base_raw or 0)
+                        old_buy = float(old_buy_raw or 0)
+                        added_standard_units = base_quantity / 1000.0
+                        old_standard_units = old_base / 1000.0
+                        total_standard_units = old_standard_units + added_standard_units
+                        new_buy = (
+                            (old_standard_units * old_buy) + (added_standard_units * buying_price)
+                        ) / total_standard_units
+                        query = {"_id": product_id, "shop_id": product["shop_id"]}
+                        query.update(snapshot_condition(product, "product_type"))
+                        query.update(snapshot_condition(product, "base_stock_quantity"))
+                        query.update(snapshot_condition(product, "buying_price"))
+                        updated = db.products.update_one(
+                            query,
+                            {"$inc": {"base_stock_quantity": base_quantity},
+                             "$set": {"buying_price": round(new_buy, 2), "updated_at": now()}},
+                            **session_kwargs,
+                        )
+                        if updated.modified_count:
+                            movement.update({
+                                "qty": base_quantity,
+                                "base_unit": product.get("base_unit"),
+                                "buying_price": round(buying_price, 2),
+                            })
+                            response = {
+                                "new_base_stock_quantity": old_base + base_quantity,
+                                "new_buying_price": round(new_buy, 2),
+                                "base_unit": product.get("base_unit"),
+                            }
+                            break
+            
+                    else:
+                        raise HTTPException(400, "Unsupported product type")
+            
+                if response is None:
+                    raise HTTPException(
+                        409,
+                        "Stock changed repeatedly while restocking; refresh the product and try again",
+                    )
+            
+                db.inventory_movements.insert_one(movement, **session_kwargs)
+            
+    except PyMongoError as exc:
+        raise HTTPException(503, "Restock could not be committed; no stock changes were saved. Please retry.") from exc
     return {
         "message": "Restock successful",
         "product_id": product_id,
-        "new_stock": new_stock,
-        "new_buying_price": round(new_buying_price, 2),
+        **response,
     }
-    
+
     # =========================
 # 📊 PROFIT + CAPITAL DASHBOARD
 # =========================
