@@ -298,11 +298,15 @@ def restock_product(
                     if ptype == "standard":
                         try:
                             qty = float(payload.get("qty"))
-                            buying_price = float(payload.get("buying_price"))
                         except (TypeError, ValueError):
-                            raise HTTPException(400, "Valid qty and buying_price are required")
-                        if not math.isfinite(qty) or not math.isfinite(buying_price) or qty <= 0 or buying_price <= 0:
-                            raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
+                            raise HTTPException(400, "A valid quantity is required")
+                        if not math.isfinite(qty) or qty <= 0:
+                            raise HTTPException(400, "Quantity must be a finite number greater than zero")
+                        # Derive unit cost from the authoritative purchase total.
+                        # Never trust a client-supplied buying_price for accounting.
+                        buying_price = total_cost / qty
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
             
                         old_stock_raw = product.get("stock")
                         old_buy_raw = product.get("buying_price")
@@ -331,13 +335,16 @@ def restock_product(
                         variant_name = str(payload.get("variant_name") or "").strip()
                         try:
                             qty = float(payload.get("qty"))
-                            buying_price = float(payload.get("buying_price"))
                         except (TypeError, ValueError):
-                            raise HTTPException(400, "Select a variant and enter valid quantity and buying price")
+                            raise HTTPException(400, "Select a variant and enter a valid quantity")
                         if not variant_name:
                             raise HTTPException(400, "variant_name required")
-                        if not math.isfinite(qty) or not math.isfinite(buying_price) or qty <= 0 or buying_price <= 0:
-                            raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
+                        if not math.isfinite(qty) or qty <= 0:
+                            raise HTTPException(400, "Quantity must be a finite number greater than zero")
+                        # Derive unit cost from the authoritative purchase total.
+                        buying_price = total_cost / qty
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
             
                         variants = product.get("variants") or []
                         variant = next((v for v in variants if v.get("name") == variant_name), None)
@@ -379,13 +386,17 @@ def restock_product(
                     elif ptype == "unit_based":
                         try:
                             base_quantity = float(payload.get("base_quantity"))
-                            buying_price = float(payload.get("buying_price"))
                         except (TypeError, ValueError):
-                            raise HTTPException(400, "Valid base_quantity and buying_price are required")
-                        if not math.isfinite(base_quantity) or not math.isfinite(buying_price) or base_quantity <= 0 or buying_price <= 0:
-                            raise HTTPException(400, "Quantity and buying price must be finite numbers greater than zero")
+                            raise HTTPException(400, "A valid base_quantity is required")
+                        if not math.isfinite(base_quantity) or base_quantity <= 0:
+                            raise HTTPException(400, "Base quantity must be a finite number greater than zero")
                         if product.get("base_unit") not in {"g", "kg", "ml", "litre", "l"}:
                             raise HTTPException(400, "Product has an invalid base unit")
+                        # Unit-based buying cost is stored per kg/litre, while stock
+                        # is stored in g/ml. Derive it from total purchase cost.
+                        buying_price = total_cost / (base_quantity / 1000.0)
+                        if not math.isfinite(buying_price) or buying_price <= 0:
+                            raise HTTPException(400, "Calculated buying price is invalid")
             
                         # Checkout values unit-based buying_price per kg/litre. Stock itself
                         # is stored in grams/ml, so convert only for the weighted-cost math.
