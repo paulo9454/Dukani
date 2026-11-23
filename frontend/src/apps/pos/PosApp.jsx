@@ -555,6 +555,7 @@ useEffect(() => {
       stockLabel = `${totalVar} in stock`;
       outOfStock = totalVar <= 0;
     } else {
+      stockLabel = `${p.stock ?? 0} in stock`;
       outOfStock = Number(p.stock || 0) <= 0;
     }
 
