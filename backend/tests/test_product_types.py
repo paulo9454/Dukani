@@ -485,3 +485,37 @@ def test_restock_uses_total_cost_as_authoritative_buying_cost(client, owner_toke
     assert unit.status_code == 200, unit.text
     saved_unit = get_db().products.find_one({"_id": unit_id})
     assert saved_unit["buying_price"] == 150
+
+def test_restock_returns_503_when_mongodb_session_start_fails(
+    client, owner_token, shop_id, monkeypatch,
+):
+    from pymongo.errors import PyMongoError
+
+    pid = _create(
+        client, owner_token, shop_id=shop_id, name="Session Failure Restock",
+        price=60, buying_price=20, stock=2,
+    ).json()["_id"]
+    db = get_db()
+
+    def fail_start_session():
+        raise PyMongoError("simulated session startup failure")
+
+    # Force the production transaction path even when the test suite normally
+    # sets TESTING=1 to bypass sessions for mongomock.
+    monkeypatch.setenv("TESTING", "0")
+    monkeypatch.setattr(db.client, "start_session", fail_start_session)
+
+    res = client.post(
+        "/api/inventory/restock",
+        headers=_auth(owner_token),
+        json={"product_id": pid, "qty": 1, "total_cost": 30},
+    )
+
+    assert res.status_code == 503, res.text
+    saved = db.products.find_one({"_id": pid})
+    assert saved["stock"] == 2
+    assert saved["buying_price"] == 20
+    assert db.inventory_movements.count_documents({
+        "product_id": pid, "type": "RESTOCK",
+    }) == 0
+
