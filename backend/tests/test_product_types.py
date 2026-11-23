@@ -324,6 +324,16 @@ def test_variant_restock_updates_only_selected_variant(client, owner_token, shop
     assert by_name["Large"]["reserved"] == 1
     assert by_name["Large"]["price"] == 300
     assert by_name["Large"]["buying_price"] == 166.67
+    movement = db.inventory_movements.find_one({
+        "product_id": pid,
+        "type": "RESTOCK",
+    })
+    assert movement is not None
+    assert movement["product_type"] == "variant"
+    assert movement["variant_name"] == "Large"
+    assert movement["qty"] == 4
+    assert movement["total_cost"] == 800
+    assert movement["buying_price"] == 200
 
 
 def test_unit_based_restock_adds_base_stock_and_preserves_selling_units(client, owner_token, shop_id):
@@ -349,6 +359,16 @@ def test_unit_based_restock_adds_base_stock_and_preserves_selling_units(client, 
     assert saved["reserved_base"] == 500
     assert saved["buying_price"] == 130
     assert saved["selling_units"] == units
+    movement = db.inventory_movements.find_one({
+        "product_id": pid,
+        "type": "RESTOCK",
+    })
+    assert movement is not None
+    assert movement["product_type"] == "unit_based"
+    assert movement["qty"] == 5000
+    assert movement["base_unit"] == "kg"
+    assert movement["total_cost"] == 750
+    assert movement["buying_price"] == 150
 
 
 def test_restock_rejects_invalid_quantity_and_unknown_variant(client, owner_token, shop_id):
