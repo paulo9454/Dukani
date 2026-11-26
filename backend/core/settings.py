@@ -36,6 +36,7 @@ class Settings(BaseModel):
     mongo_url: str = os.getenv("MONGO_URL", "mongodb://localhost:27017")
     db_name: str = os.getenv("DB_NAME", "dukani")
     jwt_secret: str = os.getenv("JWT_SECRET", "dev-secret")
+    trial_device_secret: str = os.getenv("TRIAL_DEVICE_SECRET", "")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     access_token_expire_minutes: int = _int_env("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
     refresh_token_expire_minutes: int = _int_env("REFRESH_TOKEN_EXPIRE_MINUTES", 10080)

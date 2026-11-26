@@ -2,10 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from backend.core.deps import require_roles
 from backend.db.mongo import get_db
 from backend.services.subscription_service import get_subscription
+from backend.services.trial_device import hash_trial_device_id
 import os
 import uuid
 import secrets
 from datetime import datetime, timedelta
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/api/owner", tags=["owner"])
 
@@ -56,29 +58,31 @@ def list_owner_shops(user=Depends(require_roles("owner", "admin", "partner"))):
 @router.post("/shops")
 def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("owner", "admin", "partner"))):
     from backend.services.slug import slugify, ensure_unique_slug
+
     db = get_db()
     name = (payload.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
 
+    owner_id = user["_id"]
+    existing_shop_count = db.shops.count_documents({"owner_id": owner_id})
+
     shop_id = str(uuid.uuid4())
     slug = ensure_unique_slug(db, slugify(payload.get("slug") or name))
     now = datetime.utcnow()
-    trial_end = now + timedelta(days=30)
+
     shop_doc = {
         "_id": shop_id,
         "name": name,
         "slug": slug,
-        "owner_id": user["_id"],
-        "subscription_plan": "trial",
-        # Trial includes BOTH POS and online so owners can experience the
-        # full product before paying.
-        "online_enabled": True,
-        "is_online_enabled": True,
-        "pos_enabled": True,
-        "trial_start_at": now.isoformat(),
-        "trial_end_at": trial_end.isoformat(),
-        "subscription_status": "trial",
+        "owner_id": owner_id,
+        "subscription_plan": "pos",
+        "online_enabled": False,
+        "is_online_enabled": False,
+        "pos_enabled": False,
+        "trial_start_at": None,
+        "trial_end_at": None,
+        "subscription_status": "inactive",
         "category": payload.get("category"),
         "latitude": payload.get("latitude"),
         "longitude": payload.get("longitude"),
@@ -86,22 +90,213 @@ def create_owner_shop(payload: dict = Body(...), user=Depends(require_roles("own
         "logo": payload.get("logo"),
         "description": payload.get("description"),
     }
-    db.shops.insert_one(shop_doc)
 
-    db.subscriptions.update_one(
-        {"shop_id": shop_id},
-        {"$set": {
-            "shop_id": shop_id,
-            "plan": "trial",
-            "status": "trial",
-            "trial_start": now.isoformat(),
-            "trial_end": trial_end.isoformat(),
-            "is_paid": False,
-        }},
-        upsert=True,
-    )
+    trial_eligible = False
+    trial_granted = False
+    device_hash = None
+    claim_reserved = False
+    owner_trial_marked = False
 
-    return {"message": "Shop created with 30-day free trial (POS + Online)", "shop": _normalize_id(shop_doc)}
+    if user.get("role") == "owner":
+        if existing_shop_count > 0:
+            # Existing shop owners cannot receive a new introductory trial.
+            # Keep their existing subscriptions unchanged.
+            db.users.update_one(
+                {"_id": owner_id},
+                {"$set": {
+                    "trial_used": True,
+                    "trial_legacy_blocked": True,
+                }},
+            )
+        else:
+            current_owner = db.users.find_one({
+                "_id": owner_id,
+                "role": "owner",
+            })
+
+            if current_owner and not current_owner.get("trial_used"):
+                device_hash = hash_trial_device_id(payload.get("device_id"))
+                stored_hash = current_owner.get("trial_device_hash")
+
+                if stored_hash and not secrets.compare_digest(
+                    stored_hash,
+                    device_hash,
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This account is already linked to a different device.",
+                    )
+
+                if not stored_hash:
+                    # Link legacy owners to the first device used to create a shop.
+                    db.users.update_one(
+                        {
+                            "_id": owner_id,
+                            "role": "owner",
+                            "$or": [
+                                {"trial_device_hash": {"$exists": False}},
+                                {"trial_device_hash": None},
+                            ],
+                        },
+                        {"$set": {"trial_device_hash": device_hash}},
+                    )
+
+                    current_owner = db.users.find_one({
+                        "_id": owner_id,
+                        "role": "owner",
+                    })
+
+                    if (
+                        not current_owner
+                        or current_owner.get("trial_device_hash") != device_hash
+                    ):
+                        raise HTTPException(
+                            status_code=409,
+                            detail="Device identification could not be linked to this account.",
+                        )
+
+                existing_claim = db.trial_device_claims.find_one({
+                    "_id": device_hash,
+                })
+
+                if existing_claim:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This device has already been used to claim a free trial.",
+                    )
+
+                trial_eligible = True
+
+    try:
+        # Reserve the device before creating the shop. MongoDB's unique _id
+        # prevents two accounts from claiming the same device concurrently.
+        if trial_eligible and device_hash:
+            try:
+                db.trial_device_claims.insert_one({
+                    "_id": device_hash,
+                    "owner_id": owner_id,
+                    "shop_id": shop_id,
+                    "claimed_at": now.isoformat(),
+                })
+                claim_reserved = True
+            except DuplicateKeyError:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This device has already been used to claim a free trial.",
+                )
+
+        db.shops.insert_one(shop_doc)
+
+        db.subscriptions.update_one(
+            {"shop_id": shop_id},
+            {"$set": {
+                "shop_id": shop_id,
+                "plan": "pos",
+                "status": "inactive",
+                "trial_start": None,
+                "trial_end": None,
+                "is_paid": False,
+            }},
+            upsert=True,
+        )
+
+        if claim_reserved:
+            owner_claim = db.users.update_one(
+                {
+                    "_id": owner_id,
+                    "role": "owner",
+                    "trial_used": {"$ne": True},
+                    "trial_device_hash": device_hash,
+                },
+                {"$set": {
+                    "trial_used": True,
+                    "trial_started_at": now.isoformat(),
+                    "trial_shop_id": shop_id,
+                }},
+            )
+
+            if owner_claim.modified_count != 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This account has already used or claimed its free trial.",
+                )
+
+            owner_trial_marked = True
+            trial_granted = True
+
+        if trial_granted:
+            trial_end = now + timedelta(days=30)
+
+            db.shops.update_one(
+                {"_id": shop_id},
+                {"$set": {
+                    "subscription_plan": "trial",
+                    "online_enabled": True,
+                    "is_online_enabled": True,
+                    "pos_enabled": True,
+                    "trial_start_at": now.isoformat(),
+                    "trial_end_at": trial_end.isoformat(),
+                    "subscription_status": "trial",
+                }},
+            )
+
+            db.subscriptions.update_one(
+                {"shop_id": shop_id},
+                {"$set": {
+                    "plan": "trial",
+                    "status": "trial",
+                    "trial_start": now.isoformat(),
+                    "trial_end": trial_end.isoformat(),
+                    "is_paid": False,
+                }},
+            )
+
+            shop_doc.update({
+                "subscription_plan": "trial",
+                "online_enabled": True,
+                "is_online_enabled": True,
+                "pos_enabled": True,
+                "trial_start_at": now.isoformat(),
+                "trial_end_at": trial_end.isoformat(),
+                "subscription_status": "trial",
+            })
+
+            return {
+                "message": "Shop created with 30-day free trial (POS + Online)",
+                "shop": _normalize_id(shop_doc),
+            }
+
+        return {
+            "message": "Shop created. An active subscription is required to use this shop.",
+            "shop": _normalize_id(shop_doc),
+        }
+
+    except Exception:
+        # Remove only records belonging to this newly generated shop.
+        db.subscriptions.delete_one({"shop_id": shop_id})
+        db.shops.delete_one({"_id": shop_id})
+
+        if owner_trial_marked:
+            db.users.update_one(
+                {
+                    "_id": owner_id,
+                    "trial_shop_id": shop_id,
+                },
+                {"$unset": {
+                    "trial_used": "",
+                    "trial_started_at": "",
+                    "trial_shop_id": "",
+                }},
+            )
+
+        if claim_reserved:
+            db.trial_device_claims.delete_one({
+                "_id": device_hash,
+                "owner_id": owner_id,
+                "shop_id": shop_id,
+            })
+
+        raise
 
 
 SUBSCRIPTION_PRICES_KES = {

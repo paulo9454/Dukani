@@ -42,6 +42,7 @@ def reset_db():
         "orders",
         "payments",
         "subscriptions",
+        "trial_device_claims",
         "credit_customers",
         "credit_payments_history",
         "damaged_stock",

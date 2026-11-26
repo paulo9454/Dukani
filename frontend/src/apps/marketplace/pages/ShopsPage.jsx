@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../../../api/client";
+import { createOwnerShop } from "../../../api/shops";
 
 function Shops() {
   const [shops, setShops] = useState([]);
@@ -18,7 +19,7 @@ function Shops() {
   }, []);
 
   const create = async () => {
-    await API.post("/api/owner/shops", newShop);
+    await createOwnerShop(newShop);
     setNewShop({ name: "", subscription_plan: "online" });
     load();
   };
