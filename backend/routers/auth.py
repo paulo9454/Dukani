@@ -10,6 +10,7 @@ from backend.core.security import (
 )
 from backend.core.deps import get_current_user
 from backend.services.audit import audit_log
+from backend.services.trial_device import hash_trial_device_id
 from backend.services.email_service import send_verification_email, send_password_reset_email, is_email_enabled
 from datetime import datetime, timezone, timedelta
 import random
@@ -67,8 +68,18 @@ def register(payload: RegisterRequest):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user_id = str(uuid.uuid4())
-    trial_start = datetime.now(timezone.utc) if payload.role == "owner" else None
-    trial_end = trial_start + timedelta(days=14) if trial_start else None
+    if payload.role == "owner" and not payload.device_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Device identification is required for owner registration",
+        )
+
+    device_hash = (
+        hash_trial_device_id(payload.device_id)
+        if payload.role == "owner"
+        else None
+    )
+    # Owner trials begin only after the owner's first shop is created.
 
     # If SMTP is configured, require email verification before login.
     require_verification = is_email_enabled()
@@ -80,15 +91,14 @@ def register(payload: RegisterRequest):
         "password_hash": hash_password(payload.password),
         "full_name": payload.full_name,
         "role": payload.role,
+        "trial_device_hash": device_hash,
         "assigned_shop_ids": [],
         "is_active": True,
         "is_verified": not require_verification,
         "verification_code": code,
         "verification_sent_at": datetime.now(timezone.utc).isoformat() if code else None,
-        "plan": "pos" if payload.role == "owner" else None,
-        "subscription_status": "trial" if payload.role == "owner" else "active",
-        "trial_start": trial_start.isoformat() if trial_start else None,
-        "trial_end": trial_end.isoformat() if trial_end else None,
+        "plan": None,
+        "subscription_status": "inactive" if payload.role == "owner" else "active",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     db.users.insert_one(user_doc)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import API from "../../../api/client";
+import { createOwnerShop } from "../../../api/shops";
 import MPesaSettingsModal from "../../../components/MPesaSettingsModal";
 import { shareOnWhatsApp, copyShopLink } from "../../../utils/share";
 import { toast } from "../../../utils/toast";
@@ -106,7 +107,7 @@ function Shops({ search = "" }) {
 
       const location = await getLocation();
 
-      await API.post("/api/owner/shops", {
+      await createOwnerShop({
         name: newShop.name.trim(),
         latitude: location.latitude,
         longitude: location.longitude,

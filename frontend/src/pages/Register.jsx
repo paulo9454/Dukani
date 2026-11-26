@@ -1,5 +1,6 @@
 import { useState } from "react";
 import API from "../api/client";
+import { getDeviceId } from "../utils/deviceId";
 
 function Register({ onSwitch, onNeedsVerification }) {
   const [form, setForm] = useState({
@@ -23,11 +24,13 @@ function Register({ onSwitch, onNeedsVerification }) {
     try {
       setError("");
       setLoading(true);
+      const deviceId = getDeviceId();
       const res = await API.post("/api/auth/register", {
         full_name: full_name.trim(),
         email: email.trim().toLowerCase(),
         password,
         role: "owner",
+        device_id: deviceId,
       });
 
       if (res.data?.requires_verification) {

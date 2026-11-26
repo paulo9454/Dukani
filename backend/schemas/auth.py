@@ -7,6 +7,7 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str
+    device_id: Optional[str] = Field(default=None, min_length=16, max_length=128)
 
     # 🔥 FIX: only allow customer or owner (enforced by RoleType)
     role: RoleType
